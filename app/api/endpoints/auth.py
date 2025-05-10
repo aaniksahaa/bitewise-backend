@@ -26,7 +26,7 @@ from app.schemas.auth import (
     UserRegister,
     UserRegisterResponse,
 )
-from app.services.auth import AuthService
+from app.services.auth import AuthService, get_current_active_user
 
 router = APIRouter()
 
@@ -269,7 +269,7 @@ async def refresh_token(
 @router.post("/logout")
 async def logout(
     db: Session = Depends(get_db),
-    current_user: User = Depends(AuthService.get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Invalidate the current access token and associated refresh tokens.

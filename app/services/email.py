@@ -1,14 +1,14 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from resend import Resend
+import resend
 
 from app.core.config import settings
 
 
 class EmailService:
     def __init__(self):
-        self.resend = Resend(settings.RESEND_API_KEY)
+        self.resend = resend.api_key=settings.RESEND_API_KEY
         self.from_email = settings.EMAIL_FROM
         self.from_name = settings.EMAIL_FROM_NAME
 
@@ -23,7 +23,7 @@ class EmailService:
     ) -> Dict:
         """Send an email using Resend."""
         params = {
-            "from": f"{self.from_name} <{self.from_email}>",
+            "from": self.from_email,
             "to": [to_email],
             "subject": subject,
             "html": html_content,
@@ -36,7 +36,7 @@ class EmailService:
         if reply_to:
             params["reply_to"] = reply_to
 
-        return self.resend.emails.send(params)
+        return resend.Emails.send(params)
 
     def send_verification_email(self, to_email: str, otp: str, username: str) -> Dict:
         """Send a verification email with OTP to a new user."""
