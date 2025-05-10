@@ -49,3 +49,5 @@ migrations/versions/
 
 # Logs
 *.log 
+
+task.md
