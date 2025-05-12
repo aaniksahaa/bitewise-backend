@@ -184,11 +184,12 @@ async def verify_login(verification_data: LoginVerify, db: Session = Depends(get
 
 
 @router.get("/google/login")
-async def google_login(request: Request) -> Any:
+async def google_login() -> Any:
     """
     Initiates the Google OAuth2 login flow by redirecting to Google's authentication page.
     """
-    return await google_sso.get_login_redirect(request)
+    async with google_sso:
+        return await google_sso.get_login_redirect()
 
 
 @router.get("/google/callback", response_model=GoogleLoginResponse)
