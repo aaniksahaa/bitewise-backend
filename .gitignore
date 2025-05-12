@@ -51,3 +51,4 @@ migrations/versions/
 *.log 
 
 task.md
+client_secret.json

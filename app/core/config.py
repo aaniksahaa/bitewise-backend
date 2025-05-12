@@ -2,7 +2,9 @@ import os
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
+load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -30,7 +32,7 @@ class Settings(BaseSettings):
     GOOGLE_CALLBACK_URL: str = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/api/v1/auth/google/callback")
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000"]
     
     # Database
     DATABASE_URL: str = os.getenv(
