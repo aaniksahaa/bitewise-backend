@@ -1,8 +1,15 @@
 import os
 from typing import List
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -15,10 +22,22 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev_secret_key")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1 hour
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
+    JWT_ALGORITHM: str = "HS256"
+    
+    # Email (Resend)
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    EMAIL_FROM: str = os.getenv("EMAIL_FROM", "noreply@bitewise.io")
+    EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", "BiteWise")
+    
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_CALLBACK_URL: str = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/api/v1/auth/google/callback")
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000"]
     
     # Database
     DATABASE_URL: str = os.getenv(
