@@ -19,7 +19,7 @@ class Message(Base):
     status = Column(String(50), nullable=False, default="sent")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
 
     __table_args__ = (
         CheckConstraint("message_type IN ('text', 'image', 'file', 'system')", name="valid_message_type"),

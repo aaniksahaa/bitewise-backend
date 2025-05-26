@@ -10,7 +10,7 @@ class Conversation(Base):
     status = Column(String(50), nullable=False, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
 
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived', 'deleted')", name="valid_status"),
