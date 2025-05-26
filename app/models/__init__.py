@@ -5,6 +5,7 @@ from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.ingredient import Ingredient
 from app.models.dish import Dish
+from app.models.intake import Intake
 from app.models.menu import Menu, MenuDish
 
-__all__ = ["User", "UserProfile", "Ingredient", "Dish", "Menu", "MenuDish"] 
+__all__ = ["User", "UserProfile", "Ingredient", "Dish", "Intake", "Menu", "MenuDish"] 
