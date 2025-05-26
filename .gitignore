@@ -45,9 +45,10 @@ test.db
 *.db
 
 # Alembic
-migrations/versions/
+# migrations/versions/
 
 # Logs
 *.log 
 
 task.md
+client_secret.json
