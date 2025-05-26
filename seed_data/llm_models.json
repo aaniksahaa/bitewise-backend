@@ -1,0 +1,18 @@
+[
+  {
+    "model_name": "Gemini-2.0-flash",
+    "provider_name": "Google",
+    "model_nickname": "Gemini Flash",
+    "cost_per_million_input_tokens": 0.0001,
+    "cost_per_million_output_tokens": 0.0002,
+    "is_available": true
+  },
+  {
+    "model_name": "GPT-4",
+    "provider_name": "OpenAI",
+    "model_nickname": "GPT-4",
+    "cost_per_million_input_tokens": 0.03,
+    "cost_per_million_output_tokens": 0.06,
+    "is_available": true
+  }
+] 

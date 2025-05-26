@@ -19,4 +19,5 @@ class User(Base):
     oauth_provider = Column(String, nullable=True)  # google, apple, etc.
     oauth_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow) 
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    profile = relationship("UserProfile", uselist=False, back_populates="user") 
