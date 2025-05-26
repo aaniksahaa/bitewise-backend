@@ -4,12 +4,18 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
-print(settings.DATABASE_URL)
+if settings.ENVIRONMENT == "development":
+    db_url = settings.LOCAL_DATABASE_URL
+else:
+    db_url = settings.DATABASE_URL
 
-engine = create_engine(
-    settings.DATABASE_URL.replace("\\x3a", ":"),
-    # For SQLite, connect_args={"check_same_thread": False}
-)
+# Replace any escaped colons in the URL
+if db_url:
+    db_url = db_url.replace("\\x3a", ":")
+
+print(db_url)
+
+engine = create_engine(db_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

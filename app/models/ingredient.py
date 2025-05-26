@@ -1,0 +1,38 @@
+from sqlalchemy import Column, BigInteger, String, DECIMAL, Text, DateTime, func
+from app.db.base_class import Base
+
+class Ingredient(Base):
+    __tablename__ = "ingredients"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)
+    serving_size = Column(DECIMAL(10, 2), nullable=False)
+    calories = Column(DECIMAL(10, 2))
+    protein_g = Column(DECIMAL(10, 2))
+    carbs_g = Column(DECIMAL(10, 2))
+    fats_g = Column(DECIMAL(10, 2))
+    sat_fats_g = Column(DECIMAL(10, 2))
+    unsat_fats_g = Column(DECIMAL(10, 2))
+    trans_fats_g = Column(DECIMAL(10, 2))
+    fiber_g = Column(DECIMAL(10, 2))
+    sugar_g = Column(DECIMAL(10, 2))
+    calcium_mg = Column(DECIMAL(10, 2))
+    iron_mg = Column(DECIMAL(10, 2))
+    potassium_mg = Column(DECIMAL(10, 2))
+    sodium_mg = Column(DECIMAL(10, 2))
+    zinc_mg = Column(DECIMAL(10, 2))
+    magnesium_mg = Column(DECIMAL(10, 2))
+    vit_a_mcg = Column(DECIMAL(10, 2))
+    vit_b1_mg = Column(DECIMAL(10, 2))
+    vit_b2_mg = Column(DECIMAL(10, 2))
+    vit_b3_mg = Column(DECIMAL(10, 2))
+    vit_b5_mg = Column(DECIMAL(10, 2))
+    vit_b6_mg = Column(DECIMAL(10, 2))
+    vit_b9_mcg = Column(DECIMAL(10, 2))
+    vit_b12_mcg = Column(DECIMAL(10, 2))
+    vit_c_mg = Column(DECIMAL(10, 2))
+    vit_d_mcg = Column(DECIMAL(10, 2))
+    vit_e_mg = Column(DECIMAL(10, 2))
+    vit_k_mcg = Column(DECIMAL(10, 2))
+    image_url = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now()) 
