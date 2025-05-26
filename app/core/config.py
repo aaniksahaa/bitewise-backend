@@ -2,12 +2,9 @@ import os
 from typing import List
 
 from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -38,15 +35,14 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
     # Database
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "sqlite:///./bitewise.db"
-    )
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    LOCAL_DATABASE_URL: str = os.getenv("LOCAL_DATABASE_URL", "postgresql://bitewise:your_password@localhost:5432/bitewise_dev")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
-
 
 settings = Settings() 
