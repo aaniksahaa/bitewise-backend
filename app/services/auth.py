@@ -16,8 +16,9 @@ from app.models.user import User
 from app.schemas.auth import TokenPayload
 from app.services.email import EmailService
 
-# OAuth2 for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
+# Update OAuth2 to use the correct tokenUrl
+# The token endpoint is specifically for Swagger UI authentication
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/token")
 
 # Email service instance
 email_service = EmailService()
