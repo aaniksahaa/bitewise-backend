@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi_sso.sso.google import GoogleSSO
 from sqlalchemy.orm import Session
@@ -334,4 +334,42 @@ async def complete_password_reset(
     # Update password
     AuthService.update_password(db, user.id, reset_data.new_password)
 
-    return PasswordResetCompleteResponse(message="Password reset successful") 
+    return PasswordResetCompleteResponse(message="Password reset successful")
+
+
+# Add a direct token endpoint for Swagger UI authentication
+@router.post("/token", response_model=Token)
+async def login_for_access_token(
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db)
+) -> Any:
+    """
+    OAuth2 compatible token login, get an access token for future requests.
+    This endpoint is primarily for Swagger UI authentication.
+    """
+    from fastapi.security import OAuth2PasswordRequestForm
+    from fastapi import Form
+
+    user = AuthService.get_user_by_email(db, username)
+    if not user or not AuthService.verify_password(password, user.hashed_password or ""):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not active",
+        )
+
+    # Generate tokens
+    access_token = AuthService.create_access_token(user.id)
+    
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    ) 
