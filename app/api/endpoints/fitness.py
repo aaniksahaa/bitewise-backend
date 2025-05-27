@@ -42,6 +42,8 @@ async def create_fitness_plan(plan: FitnessPlanCreate):
     return FitnessPlanResponse(
         fitness_plan_id=1,
         goal_type=plan.goal_type,
+        target_weight_kg=plan.target_weight_kg,
+        target_calories_per_day=plan.target_calories_per_day,
         start_date=datetime.combine(plan.start_date, datetime.min.time()),
         end_date=datetime.combine(plan.end_date, datetime.min.time()),
         suggestions={
@@ -76,6 +78,31 @@ async def get_user_fitness_plans(
                 suggestions=plan.suggestions or {}
             ) for plan in fitness_plans
         ]
+    )
+
+@router.get("/plans/{plan_id}", response_model=FitnessPlanResponse)
+async def get_fitness_plan(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get a specific fitness plan for the current user."""
+    fitness_plan = db.query(FitnessPlan).filter(
+        FitnessPlan.id == plan_id,
+        FitnessPlan.user_id == current_user.id
+    ).first()
+    
+    if not fitness_plan:
+        raise HTTPException(status_code=404, detail="Fitness plan not found")
+    
+    return FitnessPlanResponse(
+        fitness_plan_id=fitness_plan.id,
+        goal_type=fitness_plan.goal_type,
+        target_weight_kg=fitness_plan.target_weight_kg,
+        target_calories_per_day=fitness_plan.target_calories_per_day,
+        start_date=datetime.combine(fitness_plan.start_date, datetime.min.time()),
+        end_date=datetime.combine(fitness_plan.end_date, datetime.min.time()),
+        suggestions=fitness_plan.suggestions or {}
     )
  
 @router.get("/plans/{plan_id}/progress", response_model=ProgressResponse)
