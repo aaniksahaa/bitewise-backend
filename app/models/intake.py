@@ -1,4 +1,5 @@
 from sqlalchemy import Column, BigInteger, ForeignKey, DECIMAL, Integer, DateTime, func
+from sqlalchemy.orm import relationship
 from app.db.base_class import Base
 
 class Intake(Base):
@@ -10,4 +11,7 @@ class Intake(Base):
     intake_time = Column(DateTime(timezone=True), nullable=False)
     portion_size = Column(DECIMAL(5, 2), default=1.0)
     water_ml = Column(Integer)
-    created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship to get dish details
+    dish = relationship("Dish", foreign_keys=[dish_id]) 

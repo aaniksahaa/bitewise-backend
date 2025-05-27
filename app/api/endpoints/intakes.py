@@ -72,8 +72,20 @@ async def get_today_intakes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get all intakes for today for the current user."""
+    """Get all intakes from the last 24 hours for the current user."""
     return IntakeService.get_today_intakes(
+        db=db,
+        current_user_id=current_user.id
+    )
+
+
+@router.get("/calendar-day", response_model=IntakeListResponse)
+async def get_calendar_day_intakes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all intakes for the current calendar day (00:00 to 23:59 today) for the current user."""
+    return IntakeService.get_calendar_day_intakes(
         db=db,
         current_user_id=current_user.id
     )
