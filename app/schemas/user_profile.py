@@ -51,7 +51,10 @@ class UserProfileCreate(UserProfileBase):
 class UserProfileUpdate(UserProfileBase):
     """Schema for updating an existing user profile."""
 
-    pass
+    gender: Optional[GenderType] = None
+    height_cm: Optional[Decimal] = None
+    weight_kg: Optional[Decimal] = None
+    date_of_birth: Optional[date] = None
 
 
 class UserProfileResponse(UserProfileBase):

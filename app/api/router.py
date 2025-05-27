@@ -6,7 +6,17 @@ for different features of the application.
 
 from fastapi import APIRouter
 
-from app.api.endpoints import auth, chat, community, dishes, fitness, health, intakes, user_profile
+from app.api.endpoints import (
+    auth,
+    chat,
+    community,
+    dishes,
+    fitness,
+    health,
+    health_history,
+    intakes,
+    user_profile,
+)
 
 # from app.api.endpoints import users, items, etc.
 
@@ -21,6 +31,7 @@ api_router.include_router(dishes.router, prefix="/dishes", tags=["dishes"])
 api_router.include_router(community.router, prefix="/community", tags=["community"])
 api_router.include_router(fitness.router, prefix="/fitness", tags=["fitness"])
 api_router.include_router(intakes.router, prefix="/intakes", tags=["intakes"])
+api_router.include_router(health_history.router, prefix="/health", tags=["health"])
 # api_router.include_router(users.router, prefix="/users", tags=["users"])
 # api_router.include_router(items.router, prefix="/items", tags=["items"])
 # Add additional routers as needed

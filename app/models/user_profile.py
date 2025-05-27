@@ -1,23 +1,43 @@
-from sqlalchemy import Column, Integer, String, Date, DECIMAL, Boolean, Text, ForeignKey, DateTime, func, ARRAY, Enum
+import enum
+
+from sqlalchemy import (
+    ARRAY,
+    DECIMAL,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship
+
 from app.db.base_class import Base
-import enum
+
 
 class GenderType(enum.Enum):
     male = "male"
     female = "female"
     other = "other"
 
+
 class CookingSkillLevelType(enum.Enum):
     beginner = "beginner"
     intermediate = "intermediate"
     advanced = "advanced"
 
+
 class UserProfile(Base):
     __tablename__ = "user_profiles"
 
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     first_name = Column(String(50))
     last_name = Column(String(50))
     gender = Column(Enum(GenderType, name="gender_type"), nullable=False)
@@ -36,10 +56,17 @@ class UserProfile(Base):
     fitness_goals = Column(PG_ARRAY(Text))
     taste_preferences = Column(PG_ARRAY(Text))
     cuisine_interests = Column(PG_ARRAY(Text))
-    cooking_skill_level = Column(Enum(CookingSkillLevelType, name="cooking_skill_level_type"), default="beginner")
+    cooking_skill_level = Column(
+        Enum(CookingSkillLevelType, name="cooking_skill_level_type"), default="beginner"
+    )
     email_notifications_enabled = Column(Boolean, default=True)
     push_notifications_enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
-    user = relationship("User", back_populates="profile") 
+    user = relationship("User", back_populates="profile")
+    health_history = relationship(
+        "HealthHistory", back_populates="user_profile", cascade="all, delete-orphan"
+    )
