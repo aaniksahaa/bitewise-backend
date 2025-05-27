@@ -21,8 +21,10 @@ class UserProfileBase(BaseModel):
 
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    gender: Optional[GenderType] = None
-    date_of_birth: Optional[date] = None
+    gender: GenderType
+    height_cm: Decimal
+    weight_kg: Decimal
+    date_of_birth: date
     location_city: Optional[str] = None
     location_country: Optional[str] = None
     latitude: Optional[Decimal] = None
