@@ -25,6 +25,14 @@ class IntakeUpdate(BaseModel):
     water_ml: Optional[int] = Field(default=None, description="Water consumed in milliliters")
 
 
+class IntakeCreateByName(BaseModel):
+    """Schema for creating a new intake using dish name."""
+    dish_name: str = Field(..., min_length=1, description="Name of the dish consumed")
+    intake_time: datetime = Field(..., description="Time when the dish was consumed")
+    portion_size: Optional[Decimal] = Field(default=Decimal("1.0"), description="Portion size multiplier")
+    water_ml: Optional[int] = Field(default=None, description="Water consumed in milliliters")
+
+
 class DishDetail(BaseModel):
     """Schema for dish details in intake responses."""
     model_config = ConfigDict(from_attributes=True)

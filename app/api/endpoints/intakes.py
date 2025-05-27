@@ -8,6 +8,7 @@ from app.services.auth import get_current_active_user
 from app.services.intake import IntakeService
 from app.schemas.intake import (
     IntakeCreate, 
+    IntakeCreateByName,
     IntakeUpdate, 
     IntakeResponse, 
     IntakeListResponse
@@ -25,6 +26,20 @@ async def create_intake(
 ):
     """Create a new intake record."""
     return IntakeService.create_intake(
+        db=db, 
+        intake_data=intake_data, 
+        current_user_id=current_user.id
+    )
+
+
+@router.post("/by-name", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
+async def create_intake_by_name(
+    intake_data: IntakeCreateByName,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a new intake record using dish name instead of dish ID."""
+    return IntakeService.create_intake_by_name(
         db=db, 
         intake_data=intake_data, 
         current_user_id=current_user.id

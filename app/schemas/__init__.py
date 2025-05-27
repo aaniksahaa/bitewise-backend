@@ -14,6 +14,7 @@ from .dish import (
 from .intake import (
     IntakeBase,
     IntakeCreate,
+    IntakeCreateByName,
     IntakeUpdate,
     IntakeResponse,
     IntakeListItem,
@@ -34,6 +35,7 @@ __all__ = [
     # Intake schemas
     "IntakeBase",
     "IntakeCreate",
+    "IntakeCreateByName",
     "IntakeUpdate", 
     "IntakeResponse",
     "IntakeListItem",
