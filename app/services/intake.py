@@ -10,6 +10,7 @@ from app.models.intake import Intake
 from app.models.dish import Dish
 from app.schemas.intake import (
     IntakeCreate, 
+    IntakeCreateByName,
     IntakeUpdate, 
     IntakeResponse, 
     IntakeListItem, 
@@ -119,6 +120,37 @@ class IntakeService:
         # Load the dish relationship and return response with dish details
         db_intake_with_dish = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.id == db_intake.id).first()
         return IntakeService._create_intake_response(db_intake_with_dish)
+
+    @staticmethod
+    def create_intake_by_name(db: Session, intake_data: IntakeCreateByName, current_user_id: int) -> IntakeResponse:
+        """Create a new intake record using dish name."""
+        # Search for dish by name using exact match first, then partial match
+        dish = db.query(Dish).filter(Dish.name.ilike(intake_data.dish_name)).first()
+        
+        if not dish:
+            # Try partial match if exact match fails
+            dish = db.query(Dish).filter(Dish.name.ilike(f"%{intake_data.dish_name}%")).first()
+        
+        if not dish:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Dish with name '{intake_data.dish_name}' not found"
+            )
+        
+        # Convert to IntakeCreate using the found dish_id
+        intake_create_data = IntakeCreate(
+            dish_id=dish.id,
+            intake_time=intake_data.intake_time,
+            portion_size=intake_data.portion_size,
+            water_ml=intake_data.water_ml
+        )
+        
+        # Use the existing create_intake method
+        return IntakeService.create_intake(
+            db=db,
+            intake_data=intake_create_data,
+            current_user_id=current_user_id
+        )
 
     @staticmethod
     def get_intake_by_id(db: Session, intake_id: int, current_user_id: int) -> Optional[IntakeResponse]:
