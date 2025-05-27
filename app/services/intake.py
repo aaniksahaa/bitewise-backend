@@ -1,9 +1,10 @@
 from typing import Optional, List
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 from fastapi import HTTPException, status
 import math
+from decimal import Decimal
 
 from app.models.intake import Intake
 from app.models.dish import Dish
@@ -12,11 +13,88 @@ from app.schemas.intake import (
     IntakeUpdate, 
     IntakeResponse, 
     IntakeListItem, 
-    IntakeListResponse
+    IntakeListResponse,
+    DishDetail,
+    NutritionalSummary
 )
 
 
 class IntakeService:
+    @staticmethod
+    def _create_intake_response(intake: Intake) -> IntakeResponse:
+        """Helper method to create IntakeResponse with dish details."""
+        dish_detail = DishDetail.model_validate(intake.dish)
+        
+        # Create the response manually to include dish details
+        return IntakeResponse(
+            id=intake.id,
+            user_id=intake.user_id,
+            dish_id=intake.dish_id,
+            intake_time=intake.intake_time,
+            portion_size=intake.portion_size,
+            water_ml=intake.water_ml,
+            created_at=intake.created_at,
+            dish=dish_detail
+        )
+    
+    @staticmethod
+    def _create_intake_list_item(intake: Intake) -> IntakeListItem:
+        """Helper method to create IntakeListItem with dish details."""
+        dish_detail = DishDetail.model_validate(intake.dish)
+        
+        return IntakeListItem(
+            id=intake.id,
+            dish_id=intake.dish_id,
+            intake_time=intake.intake_time,
+            portion_size=intake.portion_size,
+            water_ml=intake.water_ml,
+            created_at=intake.created_at,
+            dish=dish_detail
+        )
+
+    @staticmethod
+    def _calculate_nutritional_summary(intakes: List[Intake]) -> NutritionalSummary:
+        """Calculate nutritional totals from a list of intakes."""
+        total_calories = Decimal("0")
+        total_protein_g = Decimal("0")
+        total_carbs_g = Decimal("0")
+        total_fats_g = Decimal("0")
+        total_fiber_g = Decimal("0")
+        total_sugar_g = Decimal("0")
+        total_water_ml = 0
+        
+        for intake in intakes:
+            portion_multiplier = intake.portion_size or Decimal("1.0")
+            
+            # Add water
+            if intake.water_ml:
+                total_water_ml += intake.water_ml
+            
+            # Add nutritional values multiplied by portion size
+            if intake.dish:
+                if intake.dish.calories:
+                    total_calories += intake.dish.calories * portion_multiplier
+                if intake.dish.protein_g:
+                    total_protein_g += intake.dish.protein_g * portion_multiplier
+                if intake.dish.carbs_g:
+                    total_carbs_g += intake.dish.carbs_g * portion_multiplier
+                if intake.dish.fats_g:
+                    total_fats_g += intake.dish.fats_g * portion_multiplier
+                if intake.dish.fiber_g:
+                    total_fiber_g += intake.dish.fiber_g * portion_multiplier
+                if intake.dish.sugar_g:
+                    total_sugar_g += intake.dish.sugar_g * portion_multiplier
+        
+        return NutritionalSummary(
+            total_calories=total_calories,
+            total_protein_g=total_protein_g,
+            total_carbs_g=total_carbs_g,
+            total_fats_g=total_fats_g,
+            total_fiber_g=total_fiber_g,
+            total_sugar_g=total_sugar_g,
+            total_water_ml=total_water_ml
+        )
+
     @staticmethod
     def create_intake(db: Session, intake_data: IntakeCreate, current_user_id: int) -> IntakeResponse:
         """Create a new intake record."""
@@ -38,12 +116,14 @@ class IntakeService:
         db.commit()
         db.refresh(db_intake)
         
-        return IntakeResponse.model_validate(db_intake)
+        # Load the dish relationship and return response with dish details
+        db_intake_with_dish = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.id == db_intake.id).first()
+        return IntakeService._create_intake_response(db_intake_with_dish)
 
     @staticmethod
     def get_intake_by_id(db: Session, intake_id: int, current_user_id: int) -> Optional[IntakeResponse]:
         """Get an intake by its ID (only for the current user)."""
-        intake = db.query(Intake).filter(
+        intake = db.query(Intake).options(joinedload(Intake.dish)).filter(
             and_(
                 Intake.id == intake_id,
                 Intake.user_id == current_user_id
@@ -53,7 +133,7 @@ class IntakeService:
         if not intake:
             return None
         
-        return IntakeResponse.model_validate(intake)
+        return IntakeService._create_intake_response(intake)
 
     @staticmethod
     def get_user_intakes(
@@ -63,7 +143,7 @@ class IntakeService:
         page_size: int = 20
     ) -> IntakeListResponse:
         """Get all intakes for the current user with pagination."""
-        query = db.query(Intake).filter(Intake.user_id == current_user_id)
+        query = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.user_id == current_user_id)
         
         # Order by intake_time descending (most recent first)
         query = query.order_by(Intake.intake_time.desc())
@@ -78,15 +158,19 @@ class IntakeService:
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Convert to response format
-        intake_items = [IntakeListItem.model_validate(intake) for intake in intakes]
+        # Convert to response format with dish details
+        intake_items = [IntakeService._create_intake_list_item(intake) for intake in intakes]
+        
+        # Calculate nutritional summary for the current page
+        nutritional_summary = IntakeService._calculate_nutritional_summary(intakes)
         
         return IntakeListResponse(
             intakes=intake_items,
             total_count=total_count,
             page=page,
             page_size=page_size,
-            total_pages=total_pages
+            total_pages=total_pages,
+            nutritional_summary=nutritional_summary
         )
 
     @staticmethod
@@ -106,7 +190,7 @@ class IntakeService:
                 detail="Start time must be before end time"
             )
         
-        query = db.query(Intake).filter(
+        query = db.query(Intake).options(joinedload(Intake.dish)).filter(
             and_(
                 Intake.user_id == current_user_id,
                 Intake.intake_time >= start_time,
@@ -127,15 +211,19 @@ class IntakeService:
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Convert to response format
-        intake_items = [IntakeListItem.model_validate(intake) for intake in intakes]
+        # Convert to response format with dish details
+        intake_items = [IntakeService._create_intake_list_item(intake) for intake in intakes]
+        
+        # Calculate nutritional summary for the current page
+        nutritional_summary = IntakeService._calculate_nutritional_summary(intakes)
         
         return IntakeListResponse(
             intakes=intake_items,
             total_count=total_count,
             page=page,
             page_size=page_size,
-            total_pages=total_pages
+            total_pages=total_pages,
+            nutritional_summary=nutritional_summary
         )
 
     @staticmethod
@@ -173,7 +261,9 @@ class IntakeService:
         db.commit()
         db.refresh(intake)
         
-        return IntakeResponse.model_validate(intake)
+        # Load the dish relationship and return response with dish details
+        intake_with_dish = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.id == intake.id).first()
+        return IntakeService._create_intake_response(intake_with_dish)
 
     @staticmethod
     def delete_intake(db: Session, intake_id: int, current_user_id: int) -> bool:
@@ -195,7 +285,25 @@ class IntakeService:
 
     @staticmethod
     def get_today_intakes(db: Session, current_user_id: int) -> IntakeListResponse:
-        """Get all intakes for today for the current user."""
+        """Get all intakes from the last 24 hours for the current user."""
+        from datetime import datetime, timezone, timedelta
+        
+        # Get current time and 24 hours ago
+        now = datetime.now(timezone.utc)
+        twenty_four_hours_ago = now - timedelta(hours=24)
+        
+        return IntakeService.get_intakes_by_period(
+            db=db,
+            current_user_id=current_user_id,
+            start_time=twenty_four_hours_ago,
+            end_time=now,
+            page=1,
+            page_size=100  # Get all intakes from last 24 hours without pagination
+        )
+
+    @staticmethod
+    def get_calendar_day_intakes(db: Session, current_user_id: int) -> IntakeListResponse:
+        """Get all intakes for the current calendar day (00:00 to 23:59 today) for the current user."""
         from datetime import date, time, datetime, timezone
         
         # Get today's start and end
@@ -209,5 +317,5 @@ class IntakeService:
             start_time=start_of_day,
             end_time=end_of_day,
             page=1,
-            page_size=100  # Get all today's intakes without pagination
+            page_size=100  # Get all today's calendar day intakes without pagination
         ) 

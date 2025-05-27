@@ -18,7 +18,9 @@ from .intake import (
     IntakeResponse,
     IntakeListItem,
     IntakeListResponse,
-    IntakePeriodQuery
+    IntakePeriodQuery,
+    DishDetail,
+    NutritionalSummary
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "IntakeListItem",
     "IntakeListResponse",
     "IntakePeriodQuery",
+    "DishDetail",
+    "NutritionalSummary",
 ] 
