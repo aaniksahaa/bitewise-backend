@@ -2,6 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from datetime import datetime, date
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.models.fitness_plan import FitnessPlan
+from app.db.session import get_db
+from app.services.auth import get_current_active_user
+from app.models.user import User
 
 router = APIRouter()
 
@@ -16,9 +22,14 @@ class FitnessPlanCreate(BaseModel):
 class FitnessPlanResponse(BaseModel):
     fitness_plan_id: int
     goal_type: str
+    target_weight_kg: float
+    target_calories_per_day: int
     start_date: datetime
     end_date: datetime
     suggestions: dict
+
+class FitnessPlansResponse(BaseModel):
+    plans: List[FitnessPlanResponse]
 
 class ProgressResponse(BaseModel):
     fitness_plan_id: int
@@ -45,6 +56,28 @@ async def create_fitness_plan(plan: FitnessPlanCreate):
         }
     )
 
+@router.get("/plans", response_model=FitnessPlansResponse)
+async def get_user_fitness_plans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all fitness plans for the current user."""
+    fitness_plans = db.query(FitnessPlan).filter(FitnessPlan.user_id == current_user.id).all()
+    
+    return FitnessPlansResponse(
+        plans=[
+            FitnessPlanResponse(
+                fitness_plan_id=plan.id,
+                goal_type=plan.goal_type,
+                target_weight_kg=plan.target_weight_kg,
+                target_calories_per_day=plan.target_calories_per_day,
+                start_date=datetime.combine(plan.start_date, datetime.min.time()),
+                end_date=datetime.combine(plan.end_date, datetime.min.time()),
+                suggestions=plan.suggestions or {}
+            ) for plan in fitness_plans
+        ]
+    )
+ 
 @router.get("/plans/{plan_id}/progress", response_model=ProgressResponse)
 async def get_fitness_progress(plan_id: int):
     """Get fitness progress."""
