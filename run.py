@@ -7,4 +7,4 @@ It creates and configures the FastAPI app instance and includes all API routers.
 import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="localhost", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
