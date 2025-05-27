@@ -223,10 +223,12 @@ async def send_chat_message(
     )
     
     # Generate AI response
-    ai_response, input_tokens, output_tokens = AgentService.generate_response(
+    ai_response, input_tokens, output_tokens, tool_attachments = AgentService.generate_response(
         user_message=chat_request.message,
         conversation_context=None,  # Could add conversation history here
-        attachments=chat_request.attachments
+        attachments=chat_request.attachments,
+        db=db,
+        current_user_id=current_user.id
     )
     
     # Get default model for cost calculation
@@ -236,7 +238,7 @@ async def send_chat_message(
     ai_message_data = MessageCreate(
         content=ai_response,
         message_type=chat_request.message_type,
-        attachments=None,  # AI could return attachments/widgets here
+        attachments=tool_attachments,  # Include tool call results in attachments
         extra_data={"generated": True}
     )
     
