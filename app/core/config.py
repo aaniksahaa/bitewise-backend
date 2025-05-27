@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "https://bitewise-delta.vercel.app"]
     
     # Database
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
