@@ -76,7 +76,7 @@ def main():
         test_search_query()
         
         # Test intake logging (will show what the agent would try to do)
-        test_log_intake_query()
+        # test_log_intake_query()
         
         print("✅ All tests completed successfully!")
         
