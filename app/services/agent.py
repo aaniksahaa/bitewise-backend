@@ -6,6 +6,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.tools import tool, BaseTool
+from langchain_core.messages import HumanMessage
+import base64
 
 from app.models.llm_model import LLMModel
 from app.services.dish import DishService
@@ -19,14 +21,18 @@ class AgentService:
     
     def __init__(self):
         self.llm = ChatOpenAI(model="gpt-4o-mini", api_key=settings.OPENAI_API_KEY)
+        self.vision_llm = ChatOpenAI(model="gpt-4o-mini", api_key=settings.OPENAI_API_KEY)
         self.tools = []  # Will be populated during run_agent
         self.tool_dict = {}
         self.parser = JsonOutputParser()
+        
+        # Updated prompt template to include image context
         self.prompt_template = ChatPromptTemplate.from_template("""
 You are BiteWise, a helpful AI assistant for nutrition and health tracking. 
 You can help users with general questions and have access to tools for searching dishes and logging food intake.
 
 User message: {message}
+{image_context}
 
 Available tools:
 {tool_descriptions}
@@ -45,19 +51,121 @@ If no tool is needed, respond with:
 }}
 
 Be conversational, friendly, and focus on helping users with their health and nutrition goals.
-Use tools when appropriate based on the user's message.
+Use tools when appropriate based on the user's message and any attached images.
+If images show food items, consider using the search_dishes tool to find nutritional information or log_intake tool if the user mentions eating something.
 """)
 
         # Template for final response generation
         self.final_response_template = ChatPromptTemplate.from_template("""
 You are BiteWise, a helpful AI assistant for nutrition and health tracking.
 A user asked: {original_message}
+{image_context}
 
 You used a tool and got this result: {tool_result}
 
 Please provide a friendly, conversational response to the user based on the tool result.
 Be helpful and explain what happened. Do not use JSON format - just respond naturally.
+Reference the images if they were relevant to the tool usage.
 """)
+    
+    def _analyze_image(self, image_data: str, content_type: str = "image/jpeg") -> str:
+        """
+        Analyze an image using OpenAI's vision model to get a compact description.
+        
+        Args:
+            image_data: Base64-encoded image data
+            content_type: MIME type of the image
+            
+        Returns:
+            Compact description of the image (under 30 words)
+        """
+        try:
+            # Create a specialized prompt for food image analysis
+            analysis_prompt = """
+            Analyze this image and provide a very compact description (under 30 words) focusing on:
+            - Food items if visible (type, preparation style, portions)
+            - Key visual characteristics that would help in food search
+            
+            Format: "A [adjective] [food item] with [key characteristics]" or similar.
+            Be specific about food types but concise. If no food is visible, describe what you see briefly.
+            """
+            
+            # Create data URL for base64 image
+            data_url = f"data:{content_type};base64,{image_data}"
+            
+            # Use HumanMessage with proper content structure for vision
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": analysis_prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]
+            )
+            
+            response = self.vision_llm.invoke([message])
+            description = response.content.strip()
+            
+            # Ensure the description is under 30 words
+            words = description.split()
+            if len(words) > 30:
+                description = " ".join(words[:30]) + "..."
+            
+            return description
+            
+        except Exception as e:
+            # Fallback description
+            return f"Image uploaded (analysis unavailable: {str(e)[:50]})"
+    
+    def _process_image_attachments(self, attachments: Optional[Dict[str, Any]]) -> str:
+        """
+        Process image attachments and return formatted context string.
+        
+        Args:
+            attachments: Dictionary containing image attachments with base64_data
+            
+        Returns:
+            Formatted string with image descriptions
+        """
+        if not attachments or "images" not in attachments or not attachments["images"]:
+            return ""
+        
+        images = attachments["images"]
+        image_descriptions = []
+        
+        for i, img in enumerate(images, 1):
+            try:
+                # Check if we have base64 data
+                base64_data = img.get("base64_data", "")
+                content_type = img.get("content_type", "image/jpeg")
+                
+                if base64_data:
+                    description = self._analyze_image(base64_data, content_type)
+                    image_descriptions.append(f"Image {i}: {description}")
+                else:
+                    # Fallback: try URL if no base64 data (for backward compatibility)
+                    image_url = img.get("url", "")
+                    if image_url:
+                        # Convert URL to base64 if needed
+                        try:
+                            import requests
+                            response = requests.get(image_url, timeout=10)
+                            if response.status_code == 200:
+                                import base64
+                                base64_encoded = base64.b64encode(response.content).decode('utf-8')
+                                description = self._analyze_image(base64_encoded, content_type)
+                                image_descriptions.append(f"Image {i}: {description}")
+                            else:
+                                image_descriptions.append(f"Image {i}: Image file (could not fetch)")
+                        except Exception as e:
+                            image_descriptions.append(f"Image {i}: Image file (fetch failed)")
+                    else:
+                        image_descriptions.append(f"Image {i}: Image file (no data available)")
+            except Exception as e:
+                image_descriptions.append(f"Image {i}: Image file (analysis failed)")
+        
+        if image_descriptions:
+            return f"\nAttached images:\n" + "\n".join(image_descriptions) + "\n"
+        
+        return ""
     
     def _create_tools_with_context(self, db: Optional[Session], current_user_id: Optional[int]) -> List[BaseTool]:
         """Create tools with proper context access."""
@@ -156,23 +264,34 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
     def run_agent(
         self, 
         user_message: str, 
+        attachments: Optional[Dict[str, Any]] = None,
         db: Optional[Session] = None, 
         current_user_id: Optional[int] = None
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
         Run the agent with a single-pass execution.
         
+        Args:
+            user_message: The user's text message
+            attachments: Optional image attachments and other data
+            db: Database session
+            current_user_id: Current user ID
+            
         Returns:
             Tuple of (response_content, tool_attachments)
         """
+        # Process image attachments to get descriptions
+        image_context = self._process_image_attachments(attachments)
+        
         # Create tools with proper context
         self.tools = self._create_tools_with_context(db, current_user_id)
         self.tool_dict = {t.name: t for t in self.tools}
         tool_descriptions = self._get_tool_descriptions()
         
-        # Prepare input data
+        # Prepare input data with image context
         input_data = {
             "message": user_message,
+            "image_context": image_context,
             "tool_descriptions": tool_descriptions
         }
         
@@ -184,18 +303,27 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
             parsed = self.parser.invoke(response.content)
         except Exception as e:
             # Fallback if JSON parsing fails
-            return f"I'm here to help with your nutrition and health questions! You asked: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'", None
+            fallback_response = f"I'm here to help with your nutrition and health questions! You asked: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'"
+            if image_context:
+                fallback_response = f"I can see you've shared some images with me. {fallback_response}"
+            return fallback_response, None
         
         # Check if tool use is requested
         if not parsed.get("use_tool", False):
-            return parsed.get("response", "I'm here to help with your nutrition and health questions!"), None
+            response_text = parsed.get("response", "I'm here to help with your nutrition and health questions!")
+            if image_context and "I can see" not in response_text and "image" not in response_text.lower():
+                response_text = f"I can see the images you've shared. {response_text}"
+            return response_text, None
         
         # Execute tool
         tool_name = parsed.get("tool_name", "")
         tool_input = parsed.get("tool_input", {})
         
         if tool_name not in self.tool_dict:
-            return f"I wanted to help you with that, but I encountered an issue with the tool '{tool_name}'. How can I assist you with your nutrition questions?", None
+            error_response = f"I wanted to help you with that, but I encountered an issue with the tool '{tool_name}'. How can I assist you with your nutrition questions?"
+            if image_context:
+                error_response = f"I can see the images you've shared. {error_response}"
+            return error_response, None
         
         # Execute the tool
         tool = self.tool_dict[tool_name]
@@ -219,6 +347,7 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
         # Generate final response using the natural language template
         final_input = {
             "original_message": user_message,
+            "image_context": image_context,
             "tool_result": json.dumps(tool_output, indent=2)
         }
         
@@ -238,8 +367,14 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
                     final_content = f"Great! I've logged your {tool_output.get('dish_name', 'food intake')} successfully."
                 else:
                     final_content = "I've completed your request!"
+                    
+                # Add image acknowledgment if present
+                if image_context:
+                    final_content = f"Based on the images you shared, {final_content.lower()}"
             else:
                 final_content = f"I tried to help you with that, but encountered an issue: {tool_output.get('error', 'Unknown error')}. How else can I assist you?"
+                if image_context:
+                    final_content = f"I can see the images you've shared. {final_content}"
         
         return final_content, tool_attachments
     
@@ -258,42 +393,25 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
             Tuple of (response_content, input_tokens, output_tokens, attachments)
         """
         try:
-            # Check if there are image attachments and prepend metadata
-            image_metadata_text = ""
-            if attachments and "images" in attachments and attachments["images"]:
-                images = attachments["images"]
-                image_count = len(images)
-                
-                # Create image metadata summary
-                if image_count == 1:
-                    img = images[0]
-                    width = img.get("metadata", {}).get("width", "unknown")
-                    height = img.get("metadata", {}).get("height", "unknown")
-                    size_kb = round(img.get("size", 0) / 1024, 1)
-                    image_metadata_text = f"📷 Thanks for uploading an image! I can see you've shared a {width}x{height} image ({size_kb}KB). "
-                else:
-                    total_size = sum(img.get("size", 0) for img in images)
-                    total_size_kb = round(total_size / 1024, 1)
-                    image_metadata_text = f"📷 Thanks for uploading {image_count} images! Total size: {total_size_kb}KB. "
-                
-                # Add a note about future image processing capabilities
-                image_metadata_text += "While I can see that you've shared images, I'm currently learning to analyze them better. For now, I can help you with any questions about the images or assist with your nutrition goals! "
-            
             agent = AgentService()
+            
+            # Generate response with image analysis
             response_content, tool_attachments = agent.run_agent(
                 user_message=user_message,
+                attachments=attachments,
                 db=db,
                 current_user_id=current_user_id
             )
             
-            # Prepend image metadata to the response
-            if image_metadata_text:
-                response_content = image_metadata_text + response_content
-            
             # Estimate token usage (rough approximation)
             input_tokens = len(user_message.split()) + 50  # Message + prompt overhead
-            if image_metadata_text:
-                input_tokens += len(image_metadata_text.split())  # Add image context tokens
+            
+            # Add tokens for image analysis if images are present
+            if attachments and "images" in attachments and attachments["images"]:
+                # Rough estimation: ~100-200 tokens per image for vision analysis
+                image_count = len(attachments["images"])
+                input_tokens += image_count * 150  # Conservative estimate for image processing
+            
             output_tokens = len(response_content.split()) + 10  # Response + overhead
             
             # Merge tool attachments with image attachments
@@ -312,7 +430,7 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
             
             # Still acknowledge images if they were uploaded
             if attachments and "images" in attachments and attachments["images"]:
-                error_response = "📷 I can see you've uploaded an image! " + error_response
+                error_response = "📷 I can see you've uploaded images! " + error_response
             
             return error_response, 0, 0, attachments
     

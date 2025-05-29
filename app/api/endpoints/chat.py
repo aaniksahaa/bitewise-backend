@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional, List
+import base64
 
 from app.db.session import get_db
 from app.services.auth import get_current_active_user
@@ -373,16 +374,30 @@ async def send_chat_message_with_images(
     current_user: User = Depends(get_current_active_user)
 ):
     """Send a chat message with image uploads."""
-    # Upload images first
+    # Process images: Upload to Supabase AND prepare base64 for agent
     uploaded_images = []
+    agent_image_data = []
+    
     for image in images:
         try:
+            # Read the image file content for base64 encoding
+            image.file.seek(0)  # Reset file pointer
+            image_content = image.file.read()
+            
+            # Encode to base64 for agent processing
+            base64_encoded = base64.b64encode(image_content).decode('utf-8')
+            
+            # Reset file pointer for upload
+            image.file.seek(0)
+            
+            # Upload to Supabase Storage for persistence
             download_url, metadata = SupabaseStorageService.upload_image(
                 file=image,
                 user_id=current_user.id,
                 folder="chat_images"
             )
             
+            # Create image attachment for database storage
             image_attachment = ImageAttachment(
                 url=download_url,
                 filename=image.filename,
@@ -392,10 +407,22 @@ async def send_chat_message_with_images(
                 metadata=metadata
             )
             uploaded_images.append(image_attachment)
+            
+            # Prepare data for agent with base64
+            agent_image_data.append({
+                "url": download_url,  # Keep URL for backward compatibility
+                "filename": image.filename,
+                "size": metadata.get("file_size", 0),
+                "content_type": image.content_type,
+                "storage_path": metadata.get("storage_path", ""),
+                "base64_data": base64_encoded,  # Add base64 data for agent
+                "metadata": metadata
+            })
+            
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to upload image {image.filename}: {str(e)}"
+                detail=f"Failed to process image {image.filename}: {str(e)}"
             )
     
     # Create conversation if not provided
@@ -408,7 +435,7 @@ async def send_chat_message_with_images(
         )
         conversation_id = conversation.id
     
-    # Prepare attachments
+    # Prepare attachments for database storage (without base64 to save space)
     attachments_data = MessageAttachments(images=uploaded_images) if uploaded_images else None
     
     # Create user message
@@ -427,11 +454,11 @@ async def send_chat_message_with_images(
         is_user_message=True
     )
     
-    # Prepare attachments for agent processing
+    # Prepare attachments for agent processing (with base64 data)
     agent_attachments = None
-    if uploaded_images:
+    if agent_image_data:
         agent_attachments = {
-            "images": [img.model_dump() for img in uploaded_images]
+            "images": agent_image_data
         }
     
     # Generate AI response
