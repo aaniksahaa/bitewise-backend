@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from typing import Optional, Dict, Any, Tuple, List
 from sqlalchemy.orm import Session
 from langchain_openai import ChatOpenAI
@@ -29,7 +30,7 @@ class AgentService:
         # Updated prompt template to include image context
         self.prompt_template = ChatPromptTemplate.from_template("""
 You are BiteWise, a helpful AI assistant for nutrition and health tracking. 
-You can help users with general questions and have access to tools for searching dishes and logging food intake.
+You can help users with general questions and have access to tools for searching dishes, logging food intake, and finding YouTube videos.
 
 User message: {message}
 {image_context}
@@ -51,8 +52,10 @@ If no tool is needed, respond with:
 }}
 
 Be conversational, friendly, and focus on helping users with their health and nutrition goals.
-Use tools when appropriate based on the user's message and any attached images.
-If images show food items, consider using the search_dishes tool to find nutritional information or log_intake tool if the user mentions eating something.
+Use tools when appropriate based on the user's message and any attached images:
+- If images show food items, consider using the search_dishes tool to find nutritional information or log_intake tool if the user mentions eating something.
+- If users ask for cooking tutorials, recipe videos, workout instructions, or any educational content that would benefit from video demonstrations, use the search_youtube_videos tool.
+- Use YouTube search for beginners asking how to cook specific dishes, exercise routines, or educational nutrition content.
 """)
 
         # Template for final response generation
@@ -146,7 +149,6 @@ Reference the images if they were relevant to the tool usage.
                     if image_url:
                         # Convert URL to base64 if needed
                         try:
-                            import requests
                             response = requests.get(image_url, timeout=10)
                             if response.status_code == 200:
                                 import base64
@@ -255,7 +257,92 @@ Reference the images if they were relevant to the tool usage.
                     "dish_name": dish_name
                 }
         
-        return [search_dishes, log_intake]
+        @tool
+        def search_youtube_videos(query: str, max_results: int = 5) -> Dict[str, Any]:
+            """Search for YouTube videos by query. Use this when the user asks for cooking tutorials, recipe videos, workout videos, or any educational content that would benefit from video demonstrations. Parameters: query (string), max_results (int, default 5)"""
+            try:
+                url = "https://youtube-v311.p.rapidapi.com/search/"
+                
+                querystring = {
+                    "part": "snippet",
+                    "maxResults": str(max_results),
+                    "order": "relevance",
+                    "q": query,
+                    "safeSearch": "moderate",
+                    "type": "video",
+                    "videoDuration": "medium",
+                    "videoEmbeddable": "true"
+                }
+                
+                headers = {
+                    "x-rapidapi-key": settings.YOUTUBE_V3_API_KEY,
+                    "x-rapidapi-host": "youtube-v311.p.rapidapi.com"
+                }
+                
+                response = requests.get(url, headers=headers, params=querystring, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    videos = []
+                    
+                    # Extract video information from the response
+                    if "items" in data:
+                        for item in data["items"]:
+                            snippet = item.get("snippet", {})
+                            video_info = {
+                                "video_id": item.get("id", {}).get("videoId", ""),
+                                "title": snippet.get("title", ""),
+                                "description": snippet.get("description", "")[:200] + "..." if len(snippet.get("description", "")) > 200 else snippet.get("description", ""),
+                                "channel_title": snippet.get("channelTitle", ""),
+                                "channel_id": snippet.get("channelId", ""),
+                                "published_at": snippet.get("publishedAt", ""),
+                                "publish_time": snippet.get("publishTime", ""),
+                                "thumbnail_url": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                                "video_url": f"https://www.youtube.com/watch?v={item.get('id', {}).get('videoId', '')}"
+                            }
+                            videos.append(video_info)
+                    
+                    # Extract metadata from API response
+                    page_info = data.get("pageInfo", {})
+                    total_results = page_info.get("totalResults", len(videos))
+                    results_per_page = page_info.get("resultsPerPage", len(videos))
+                    next_page_token = data.get("nextPageToken", "")
+                    region_code = data.get("regionCode", "")
+                    
+                    return {
+                        "success": True,
+                        "videos": videos,
+                        "query": query,
+                        "total_results": total_results,
+                        "results_per_page": results_per_page,
+                        "returned_count": len(videos),
+                        "next_page_token": next_page_token,
+                        "region_code": region_code
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"YouTube API returned status code {response.status_code}",
+                        "query": query,
+                        "videos": []
+                    }
+                    
+            except requests.exceptions.Timeout:
+                return {
+                    "success": False,
+                    "error": "Request to YouTube API timed out",
+                    "query": query,
+                    "videos": []
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "query": query,
+                    "videos": []
+                }
+        
+        return [search_dishes, log_intake, search_youtube_videos]
     
     def _get_tool_descriptions(self) -> str:
         """Get formatted tool descriptions."""
@@ -365,6 +452,9 @@ Reference the images if they were relevant to the tool usage.
                     final_content = f"I found {dishes_count} dishes matching your search for '{tool_output.get('search_term', 'your query')}'!"
                 elif tool_name == "log_intake":
                     final_content = f"Great! I've logged your {tool_output.get('dish_name', 'food intake')} successfully."
+                elif tool_name == "search_youtube_videos":
+                    videos_count = len(tool_output.get("videos", []))
+                    final_content = f"I found {videos_count} YouTube videos for '{tool_output.get('query', 'your search')}'! These videos should be helpful for your request."
                 else:
                     final_content = "I've completed your request!"
                     

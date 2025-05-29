@@ -165,6 +165,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[int] = Field(default=None, description="Existing conversation ID, if any")
     message_type: MessageType = Field(default=MessageType.TEXT, description="Type of message")
     context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context for AI")
+    attachments: Optional[Union[Dict[str, Any], MessageAttachments]] = Field(default=None, description="Message attachments (files, images, widgets, etc.)")
 
 
 class ChatWithImageRequest(BaseModel):

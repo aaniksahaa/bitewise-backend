@@ -374,6 +374,28 @@ async def send_chat_message_with_images(
     current_user: User = Depends(get_current_active_user)
 ):
     """Send a chat message with image uploads."""
+    # Handle the case where FastAPI passes invalid data for empty file uploads
+    # This can happen when the client sends an empty form field
+    valid_images = []
+    
+    if images:
+        for image in images:
+            # First check if it's actually an UploadFile object (not a string or other type)
+            # This prevents the "Expected UploadFile, received: <class 'str'>" error
+            if not hasattr(image, '__class__') or 'UploadFile' not in str(type(image)):
+                continue
+                
+            # Check if it's a proper UploadFile object with valid content
+            if (hasattr(image, 'filename') and 
+                hasattr(image, 'file') and 
+                hasattr(image, 'content_type') and
+                image.filename and 
+                image.filename.strip() != "" and
+                image.filename != ""):
+                valid_images.append(image)
+    
+    images = valid_images
+    
     # Process images: Upload to Supabase AND prepare base64 for agent
     uploaded_images = []
     agent_image_data = []
