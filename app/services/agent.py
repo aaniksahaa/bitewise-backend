@@ -252,12 +252,33 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
         current_user_id: Optional[int] = None
     ) -> Tuple[str, int, int, Optional[Dict[str, Any]]]:
         """
-        Generate an AI response with optional tool usage.
+        Generate an AI response with optional tool usage and image handling.
         
         Returns:
             Tuple of (response_content, input_tokens, output_tokens, attachments)
         """
         try:
+            # Check if there are image attachments and prepend metadata
+            image_metadata_text = ""
+            if attachments and "images" in attachments and attachments["images"]:
+                images = attachments["images"]
+                image_count = len(images)
+                
+                # Create image metadata summary
+                if image_count == 1:
+                    img = images[0]
+                    width = img.get("metadata", {}).get("width", "unknown")
+                    height = img.get("metadata", {}).get("height", "unknown")
+                    size_kb = round(img.get("size", 0) / 1024, 1)
+                    image_metadata_text = f"📷 Thanks for uploading an image! I can see you've shared a {width}x{height} image ({size_kb}KB). "
+                else:
+                    total_size = sum(img.get("size", 0) for img in images)
+                    total_size_kb = round(total_size / 1024, 1)
+                    image_metadata_text = f"📷 Thanks for uploading {image_count} images! Total size: {total_size_kb}KB. "
+                
+                # Add a note about future image processing capabilities
+                image_metadata_text += "While I can see that you've shared images, I'm currently learning to analyze them better. For now, I can help you with any questions about the images or assist with your nutrition goals! "
+            
             agent = AgentService()
             response_content, tool_attachments = agent.run_agent(
                 user_message=user_message,
@@ -265,16 +286,35 @@ Be helpful and explain what happened. Do not use JSON format - just respond natu
                 current_user_id=current_user_id
             )
             
+            # Prepend image metadata to the response
+            if image_metadata_text:
+                response_content = image_metadata_text + response_content
+            
             # Estimate token usage (rough approximation)
             input_tokens = len(user_message.split()) + 50  # Message + prompt overhead
+            if image_metadata_text:
+                input_tokens += len(image_metadata_text.split())  # Add image context tokens
             output_tokens = len(response_content.split()) + 10  # Response + overhead
             
-            return response_content, input_tokens, output_tokens, tool_attachments
+            # Merge tool attachments with image attachments
+            final_attachments = tool_attachments or {}
+            if attachments:
+                if "images" in attachments:
+                    final_attachments["images"] = attachments["images"]
+                if "tool_results" in attachments:
+                    final_attachments["tool_results"] = attachments.get("tool_results", {})
+            
+            return response_content, input_tokens, output_tokens, final_attachments
             
         except Exception as e:
             # Fallback response
             error_response = f"I'm experiencing some technical difficulties, but I'm here to help with your nutrition and health questions. You asked: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'"
-            return error_response, 0, 0, None
+            
+            # Still acknowledge images if they were uploaded
+            if attachments and "images" in attachments and attachments["images"]:
+                error_response = "📷 I can see you've uploaded an image! " + error_response
+            
+            return error_response, 0, 0, attachments
     
     @staticmethod
     def get_default_model(db: Session) -> Optional[LLMModel]:

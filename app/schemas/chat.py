@@ -28,6 +28,34 @@ class ConversationStatus(str, Enum):
     DELETED = "deleted"
 
 
+# Image and File Attachment Schemas
+class ImageAttachment(BaseModel):
+    """Schema for image attachments."""
+    url: str = Field(..., description="Public URL of the uploaded image")
+    filename: str = Field(..., description="Original filename")
+    size: int = Field(..., description="File size in bytes")
+    content_type: str = Field(..., description="MIME type of the image")
+    storage_path: str = Field(..., description="Path in Firebase storage")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Image metadata (dimensions, format, etc.)")
+
+
+class FileAttachment(BaseModel):
+    """Schema for general file attachments."""
+    url: str = Field(..., description="Public URL of the uploaded file")
+    filename: str = Field(..., description="Original filename")
+    size: int = Field(..., description="File size in bytes")
+    content_type: str = Field(..., description="MIME type of the file")
+    storage_path: str = Field(..., description="Path in storage")
+
+
+class MessageAttachments(BaseModel):
+    """Schema for message attachments."""
+    images: List[ImageAttachment] = Field(default_factory=list, description="Image attachments")
+    files: List[FileAttachment] = Field(default_factory=list, description="File attachments")
+    widgets: Optional[Dict[str, Any]] = Field(default=None, description="Interactive widgets")
+    tool_results: Optional[Dict[str, Any]] = Field(default=None, description="Results from tool calls")
+
+
 # Conversation Schemas
 class ConversationBase(BaseModel):
     """Base schema for conversation operations."""
@@ -86,7 +114,7 @@ class MessageBase(BaseModel):
     """Base schema for message operations."""
     content: str = Field(..., description="Message content")
     message_type: MessageType = Field(default=MessageType.TEXT, description="Type of message")
-    attachments: Optional[Dict[str, Any]] = Field(default=None, description="Message attachments (files, images, widgets, etc.)")
+    attachments: Optional[Union[Dict[str, Any], MessageAttachments]] = Field(default=None, description="Message attachments (files, images, widgets, etc.)")
     extra_data: Optional[Dict[str, Any]] = Field(default=None, description="Additional message metadata")
 
 
@@ -136,8 +164,16 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000, description="User message content")
     conversation_id: Optional[int] = Field(default=None, description="Existing conversation ID, if any")
     message_type: MessageType = Field(default=MessageType.TEXT, description="Type of message")
-    attachments: Optional[Dict[str, Any]] = Field(default=None, description="Message attachments (files, images, widgets, etc.)")
     context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context for AI")
+
+
+class ChatWithImageRequest(BaseModel):
+    """Schema for sending a chat message with image uploads."""
+    message: str = Field(..., min_length=1, max_length=10000, description="User message content")
+    conversation_id: Optional[int] = Field(default=None, description="Existing conversation ID, if any")
+    message_type: MessageType = Field(default=MessageType.TEXT, description="Type of message")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context for AI")
+    # Note: Images will be handled as UploadFile in the endpoint, not in this schema
 
 
 class ChatResponse(BaseModel):
@@ -171,4 +207,15 @@ class ConversationSummaryResponse(BaseModel):
     summary: str
     key_topics: List[str]
     message_count: int
-    date_range: Dict[str, datetime] 
+    date_range: Dict[str, datetime]
+
+
+# Image Upload Response Schemas
+class ImageUploadResponse(BaseModel):
+    """Schema for image upload response."""
+    success: bool
+    image_url: str
+    filename: str
+    size: int
+    metadata: Dict[str, Any]
+    message: str = "Image uploaded successfully" 
