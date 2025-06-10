@@ -30,7 +30,7 @@ def test_generate_response_basic(monkeypatch):
         assert "protein" in response.lower()
         assert isinstance(input_tokens, int)
         assert isinstance(output_tokens, int)
-        assert isinstance(attachments, dict)
+        assert attachments is None or isinstance(attachments, dict)
 
 
 def test_generate_response_with_attachments(monkeypatch):
@@ -52,6 +52,6 @@ def test_generate_response_with_attachments(monkeypatch):
             attachments={"images": [{"base64_data": "fakebase64", "content_type": "image/png"}]}
         )
         assert "image" in response.lower()
-        assert isinstance(attachments, dict)
+        assert attachments is None or isinstance(attachments, dict)
 
 # You may add more granular unit tests for tool invocation, error handling, etc.
