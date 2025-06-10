@@ -36,8 +36,9 @@ jobs:
     env:
       # Required environment variables for tests
       SECRET_KEY: "test-secret-key-for-ci-only"
-      ENVIRONMENT: "test"
+      ENVIRONMENT: "development"  # Use development so it picks up LOCAL_DATABASE_URL
       LOCAL_DATABASE_URL: "sqlite:///./test.db"
+      DATABASE_URL: "sqlite:///./test.db"  # Fallback in case needed
       OPENAI_API_KEY: "test-key"
       SUPABASE_URL: "https://test.supabase.co"
       SUPABASE_KEY: "test-key"
