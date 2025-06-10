@@ -66,13 +66,7 @@ jobs:
         chmod 755 ./tests
     - name: Test with pytest
       run: |
-        pytest tests/ -v --tb=short --disable-warnings --cov=app --cov-report=term-missing
-    - name: Upload coverage reports
-      uses: codecov/codecov-action@v4
-      if: success()
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
+        pytest tests/ -v --tb=short --disable-warnings
     - name: Clean up test files
       if: always()
       run: |
