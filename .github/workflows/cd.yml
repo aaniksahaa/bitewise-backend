@@ -1,0 +1,45 @@
+name: CD
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to Azure VM
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          cd /home/azureuser/bitewise-backend
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Update backend
+          source .venv/bin/activate
+          pip install -r requirements.txt
+          
+          # Update frontend (if in same repo)
+          # cd frontend  # adjust path
+          # npm install
+          # npm run build
+
+          cd ..
+          
+          # Restart services
+          pm2 restart bitewise-backend
+          sudo systemctl reload nginx
+          
+          # Optional: Run a quick health check
+          sleep 5
+          curl -f http://localhost:8000/health || echo "Backend health check failed"
