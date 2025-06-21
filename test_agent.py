@@ -83,5 +83,6 @@ def main():
     except Exception as e:
         print(f"❌ Error during testing: {e}")
 
-if __name__ == "__main__":
-    main() 
+# This script's logic has been migrated to pytest-based tests in tests/unit/test_agent_service.py and tests/integration/test_chat_endpoints.py
+# Please use `pytest` to run the new tests.
+ 
