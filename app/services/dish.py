@@ -6,6 +6,7 @@ import math
 
 from app.models.dish import Dish
 from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListItem, DishListResponse
+from app.utils.search import SearchUtils
 
 
 class DishService:
@@ -43,16 +44,19 @@ class DishService:
         page_size: int = 20
     ) -> DishListResponse:
         """Get dishes with optional search and filtering."""
-        query = db.query(Dish)
-        
-        # Apply search filter (substring search on name and description)
-        if search:
-            search_filter = or_(
-                Dish.name.ilike(f"%{search}%"),
-                Dish.description.ilike(f"%{search}%"),
-                Dish.cuisine.ilike(f"%{search}%")
+        # If there's a search term, use the new fuzzy search
+        if search and search.strip():
+            return DishService._fuzzy_search_dishes(
+                db=db,
+                search_term=search,
+                cuisine=cuisine,
+                created_by_user_id=created_by_user_id,
+                page=page,
+                page_size=page_size
             )
-            query = query.filter(search_filter)
+        
+        # Otherwise, use the original filtering logic
+        query = db.query(Dish)
         
         # Apply cuisine filter
         if cuisine:
@@ -84,23 +88,82 @@ class DishService:
         )
 
     @staticmethod
+    def _fuzzy_search_dishes(
+        db: Session,
+        search_term: str,
+        cuisine: Optional[str] = None,
+        created_by_user_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> DishListResponse:
+        """Internal method for fuzzy search with additional filters."""
+        # Get scored results from fuzzy search
+        scored_dishes, total_before_filters = SearchUtils.search_dishes_with_scoring(
+            db=db,
+            search_term=search_term,
+            page=1,  # Get all results first for filtering
+            page_size=1000,  # Large number to get all results
+            min_score_threshold=5.0  # Lower threshold for more inclusive results
+        )
+        
+        # Apply additional filters if specified
+        if cuisine or created_by_user_id:
+            filtered_dishes = []
+            for dish, score in scored_dishes:
+                # Apply cuisine filter
+                if cuisine and not (dish.cuisine and cuisine.lower() in dish.cuisine.lower()):
+                    continue
+                
+                # Apply creator filter
+                if created_by_user_id and dish.created_by_user_id != created_by_user_id:
+                    continue
+                
+                filtered_dishes.append((dish, score))
+            
+            scored_dishes = filtered_dishes
+        
+        # Apply pagination to filtered results
+        total_count = len(scored_dishes)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_dishes = scored_dishes[start_idx:end_idx]
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format (ignoring scores in final response)
+        dish_items = [DishListItem.model_validate(dish) for dish, score in paginated_dishes]
+        
+        return DishListResponse(
+            dishes=dish_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
+
+    @staticmethod
     def search_dishes_by_name(
         db: Session, 
         search_term: str, 
         page: int = 1, 
         page_size: int = 20
     ) -> DishListResponse:
-        """Search dishes by name using substring matching."""
-        query = db.query(Dish).filter(
-            Dish.name.ilike(f"%{search_term}%")
+        """Search dishes by name using intelligent fuzzy matching and scoring."""
+        # Use the new fuzzy search utility
+        scored_dishes, total_count = SearchUtils.search_dishes_with_scoring(
+            db=db,
+            search_term=search_term,
+            page=page,
+            page_size=page_size,
+            min_score_threshold=10.0  # Reasonable threshold for name search
         )
         
-        total_count = query.count()
-        offset = (page - 1) * page_size
-        dishes = query.offset(offset).limit(page_size).all()
-        
+        # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-        dish_items = [DishListItem.model_validate(dish) for dish in dishes]
+        
+        # Convert to response format (ignoring scores in final response)
+        dish_items = [DishListItem.model_validate(dish) for dish, score in scored_dishes]
         
         return DishListResponse(
             dishes=dish_items,
