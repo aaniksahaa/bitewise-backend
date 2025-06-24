@@ -7,6 +7,7 @@ from app.models.conversation import Conversation
 from app.models.dish import Dish
 from app.models.dish_ingredient import DishIngredient
 from app.models.fitness_plan import FitnessPlan
+from app.models.health_history import HealthHistory
 from app.models.ingredient import Ingredient
 from app.models.intake import Intake
 from app.models.llm_model import LLMModel
@@ -19,6 +20,7 @@ from app.models.user_profile import UserProfile
 __all__ = [
     "User",
     "UserProfile",
+    "HealthHistory",
     "Ingredient",
     "Dish",
     "Intake",

@@ -4,6 +4,8 @@ Simple test script for the BiteWise Agent.
 This demonstrates the agent's capabilities without needing the full FastAPI server.
 """
 
+# testing agent
+
 import os
 from typing import Dict, Any
 from app.services.agent import AgentService

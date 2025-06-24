@@ -35,9 +35,6 @@ class Settings(BaseSettings):
     # OpenAI API
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     
-    # YouTube API
-    YOUTUBE_V3_API_KEY: str = os.getenv("YOUTUBE_V3_API_KEY", "")
-    
     # Supabase
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")  # This should be the service_role key for server-side operations
@@ -46,6 +43,9 @@ class Settings(BaseSettings):
     # File Upload
     MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))  # 10MB default
     ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    
+    # YouTube API
+    YOUTUBE_V3_API_KEY: str = os.getenv("YOUTUBE_V3_API_KEY", "")
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "https://bitewise-delta.vercel.app"]

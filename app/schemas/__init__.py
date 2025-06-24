@@ -24,6 +24,18 @@ from .intake import (
     NutritionalSummary
 )
 
+# Stats schemas
+from .stats import (
+    TimePeriod, TimeUnit, StatsTimeRange, SimpleTimeRange,
+    CalorieStats, CalorieDataPoint,
+    MacronutrientStats, MacronutrientBreakdown, MacronutrientDataPoint,
+    MicronutrientStats, MicronutrientValue,
+    ConsumptionPatternStats, DishFrequency, CuisineDistribution, EatingPatternDataPoint,
+    ProgressStats, HealthMetricDataPoint,
+    NutritionOverview, ComprehensiveStats, QuickStats,
+    PeriodComparison, AdvancedAnalytics, CorrelationInsight, PredictiveInsight
+)
+
 __all__ = [
     # Dish schemas
     "DishBase",
@@ -43,4 +55,18 @@ __all__ = [
     "IntakePeriodQuery",
     "DishDetail",
     "NutritionalSummary",
+    # Stats schemas
+    "StatsTimeRange",
+    "TimePeriod",
+    "CalorieStats",
+    "CalorieDataPoint",
+    "MacronutrientStats",
+    "MacronutrientBreakdown",
+    "MicronutrientStats",
+    "ConsumptionPatternStats",
+    "ProgressStats",
+    "NutritionOverview",
+    "ComprehensiveStats",
+    "QuickStats",
+    "PeriodComparison",
 ] 
