@@ -187,7 +187,7 @@ async def verify_login(verification_data: LoginVerify, db: Session = Depends(get
 
 @router.get("/google/login", response_model=GoogleLoginUrlResponse)
 async def google_login(
-    redirect_uri: str,  # Make this required as per frontend requirements
+    redirect_uri: Optional[str] = None,
     state: Optional[str] = None
 ) -> Any:
     """
@@ -199,20 +199,25 @@ async def google_login(
         import secrets
         state = secrets.token_urlsafe(32)
     
-    # Build Google OAuth authorization URL according to OAuth2 spec
-    google_auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth"
-        f"?client_id={settings.GOOGLE_CLIENT_ID}"
-        f"&redirect_uri={redirect_uri}"
-        f"&response_type=code"
-        f"&scope=openid email profile"
-        f"&state={state}"
-        f"&access_type=offline"
-        f"&prompt=select_account"
-    )
+    # Use redirect_uri from parameter or default from settings
+    final_redirect_uri = redirect_uri or settings.GOOGLE_CALLBACK_URL
+    
+    # Use fastapi_sso to generate the login redirect
+    async with google_sso:
+        redirect_response = await google_sso.get_login_redirect(
+            redirect_uri=final_redirect_uri,
+            state=state,
+            params={
+                "prompt": "consent", 
+                "access_type": "offline"
+            }
+        )
+    
+    # Extract the URL from the redirect response
+    authorization_url = str(redirect_response.headers.get("location", ""))
     
     return GoogleLoginUrlResponse(
-        authorization_url=google_auth_url,
+        authorization_url=authorization_url,
         state=state
     )
 
@@ -227,18 +232,18 @@ async def google_callback_get(
     This is the traditional OAuth flow where Google redirects directly to this endpoint.
     """
     try:
-        # Extract code and state from query parameters
-        code = request.query_params.get("code")
-        state = request.query_params.get("state")
+        # Use fastapi_sso to verify and process the callback
+        async with google_sso:
+            google_user = await google_sso.verify_and_process(request)
         
-        if not code:
+        if not google_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Authorization code not provided"
+                detail="Failed to verify Google authentication"
             )
         
-        # Process the callback using the same logic
-        return await _process_google_callback(code, state, db)
+        # Process the user data
+        return await _process_google_user(google_user, db)
         
     except HTTPException:
         raise
@@ -259,7 +264,9 @@ async def google_callback_post(
     This is for frontend applications that capture the callback and send it as API call.
     """
     try:
-        return await _process_google_callback(callback_data.code, callback_data.state, db)
+        # For POST requests, we need to manually create a request-like object
+        # or handle the code exchange manually since fastapi_sso expects a Request object
+        return await _process_google_callback_manual(callback_data.code, callback_data.state, db)
     except HTTPException:
         raise
     except Exception as e:
@@ -269,91 +276,47 @@ async def google_callback_post(
         )
 
 
-async def _process_google_callback(code: str, state: Optional[str], db: Session) -> GoogleLoginResponse:
+async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResponse:
     """
-    Common function to process Google OAuth callback for both GET and POST endpoints.
+    Process Google user data and create/update user in database.
     """
-    # Exchange authorization code for access token with Google
-    import httpx
-    
-    token_url = "https://oauth2.googleapis.com/token"
-    token_data = {
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": settings.GOOGLE_CALLBACK_URL,
-    }
-    
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(token_url, data=token_data)
-        
-    if token_response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to exchange authorization code for access token"
-        )
-        
-    token_info = token_response.json()
-    access_token = token_info.get("access_token")
-    
-    if not access_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No access token received from Google"
-        )
-    
-    # Get user info from Google
-    user_info_url = f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
-    
-    async with httpx.AsyncClient() as client:
-        user_response = await client.get(user_info_url)
-        
-    if user_response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to fetch user information from Google"
-        )
-        
-    user_info = user_response.json()
-    
     # Validate required user info from Google
-    if not user_info.get("email") or not user_info.get("id"):
+    if not google_user.email or not google_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid user information received from Google",
         )
 
     # Check if user exists by OAuth provider and ID
-    user = AuthService.get_user_by_oauth(db, "google", user_info["id"])
+    user = AuthService.get_user_by_oauth(db, "google", google_user.id)
     is_new_user = False
     first_login = False
 
     if not user:
         # Check if a user already exists with this email but different provider
-        existing_user = AuthService.get_user_by_email(db, user_info["email"])
+        existing_user = AuthService.get_user_by_email(db, google_user.email)
         
         if existing_user:
             # Link Google account to existing user
             existing_user.oauth_provider = "google"
-            existing_user.oauth_id = user_info["id"]
+            existing_user.oauth_id = google_user.id
             existing_user.is_verified = True
             db.commit()
             user = existing_user
             first_login = False
         else:
             # Create new user with unique username handling
-            base_username = user_info["email"].split("@")[0]
+            base_username = google_user.email.split("@")[0]
             username = AuthService.generate_unique_username(db, base_username)
             
             is_new_user = True
             first_login = True
             user = User(
-                email=user_info["email"],
+                email=google_user.email,
                 username=username,
-                full_name=user_info.get("name", ""),
+                full_name=getattr(google_user, 'display_name', '') or getattr(google_user, 'name', ''),
                 oauth_provider="google",
-                oauth_id=user_info["id"],
+                oauth_id=google_user.id,
                 is_active=True,
                 is_verified=True,  # Google users are pre-verified
             )
@@ -406,6 +369,66 @@ async def _process_google_callback(code: str, state: Optional[str], db: Session)
         profile_complete=profile_complete,
         is_new_user=is_new_user,
     )
+
+
+async def _process_google_callback_manual(code: str, state: Optional[str], db: Session) -> GoogleLoginResponse:
+    """
+    Manual processing for POST callback requests where we can't use fastapi_sso's verify_and_process.
+    """
+    # Exchange authorization code for access token with Google
+    import httpx
+    
+    token_url = "https://oauth2.googleapis.com/token"
+    token_data = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": settings.GOOGLE_CALLBACK_URL,
+    }
+    
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(token_url, data=token_data)
+        
+    if token_response.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to exchange authorization code for access token"
+        )
+        
+    token_info = token_response.json()
+    access_token = token_info.get("access_token")
+    
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No access token received from Google"
+        )
+    
+    # Get user info from Google
+    user_info_url = f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
+    
+    async with httpx.AsyncClient() as client:
+        user_response = await client.get(user_info_url)
+        
+    if user_response.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to fetch user information from Google"
+        )
+        
+    user_info = user_response.json()
+    
+    # Create a simple user object similar to what fastapi_sso would return
+    class GoogleUserInfo:
+        def __init__(self, data):
+            self.id = data.get("id")
+            self.email = data.get("email")
+            self.name = data.get("name", "")
+            self.display_name = data.get("name", "")
+    
+    google_user = GoogleUserInfo(user_info)
+    return await _process_google_user(google_user, db)
 
 
 @router.post("/refresh", response_model=Token)
