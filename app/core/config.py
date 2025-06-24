@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/gif", "image/webp"]
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "https://bitewise-delta.vercel.app"]
     
     # Database
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
