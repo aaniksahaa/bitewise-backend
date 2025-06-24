@@ -1,0 +1,27 @@
+name: CD
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to Azure VM
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          # Make sure deploy script is executable
+          chmod +x /home/azureuser/bitewise-backend/deploy-docker.sh
+          
+          # Run deployment
+          /home/azureuser/bitewise-backend/deploy-docker.sh

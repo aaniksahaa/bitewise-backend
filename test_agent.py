@@ -4,6 +4,8 @@ Simple test script for the BiteWise Agent.
 This demonstrates the agent's capabilities without needing the full FastAPI server.
 """
 
+# testing agent
+
 import os
 from typing import Dict, Any
 from app.services.agent import AgentService
@@ -76,12 +78,13 @@ def main():
         test_search_query()
         
         # Test intake logging (will show what the agent would try to do)
-        test_log_intake_query()
+        # test_log_intake_query()
         
         print("✅ All tests completed successfully!")
         
     except Exception as e:
         print(f"❌ Error during testing: {e}")
 
-if __name__ == "__main__":
-    main() 
+# This script's logic has been migrated to pytest-based tests in tests/unit/test_agent_service.py and tests/integration/test_chat_endpoints.py
+# Please use `pytest` to run the new tests.
+ 

@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend - Production
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: bitewise-api-prod
+    environment:
+      # Application
+      ENVIRONMENT: production
+      SECRET_KEY: ${SECRET_KEY}
+      
+      # Database - Supabase PostgreSQL
+      DATABASE_URL: ${DATABASE_URL}
+      # For development, you can still use LOCAL_DATABASE_URL if needed
+      # LOCAL_DATABASE_URL: ${LOCAL_DATABASE_URL:-}
+      
+      # External APIs
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      YOUTUBE_V3_API_KEY: ${YOUTUBE_V3_API_KEY}
+
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      SUPABASE_BUCKET_NAME: ${SUPABASE_BUCKET_NAME}
+      
+      # Email
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      # EMAIL_FROM_NAME: ${EMAIL_FROM_NAME}
+      
+      # OAuth
+      # GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      # GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      # GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+      
+      # File Upload
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-10}
+    ports:
+      - "127.0.0.1:8000:8000"  # Bind only to localhost since nginx will proxy
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '1'
+        reservations:
+          memory: 2G
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3" 
