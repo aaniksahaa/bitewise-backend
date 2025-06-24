@@ -49,6 +49,19 @@ class AuthService:
         return "".join(secrets.choice(alphabet) for _ in range(length))
 
     @classmethod
+    def generate_unique_username(cls, db: Session, base_username: str) -> str:
+        """Generate a unique username by checking for collisions and appending numbers if needed."""
+        username = base_username
+        counter = 1
+        
+        # Check for username collisions and resolve them
+        while db.query(User).filter(User.username == username).first():
+            username = f"{base_username}{counter}"
+            counter += 1
+            
+        return username
+
+    @classmethod
     def create_otp(
         cls, db: Session, user_id: int, email: str, purpose: str, expires_in: int = 300
     ) -> Tuple[str, datetime]:

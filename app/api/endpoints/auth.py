@@ -35,7 +35,7 @@ google_sso = GoogleSSO(
     client_id=settings.GOOGLE_CLIENT_ID,
     client_secret=settings.GOOGLE_CLIENT_SECRET,
     redirect_uri=settings.GOOGLE_CALLBACK_URL,
-    allow_insecure_http=True,  # Only for development
+    allow_insecure_http=settings.ENVIRONMENT == "development",  # Only for development
 )
 
 
@@ -199,36 +199,71 @@ async def google_callback(request: Request, db: Session = Depends(get_db)) -> An
     """
     try:
         user_info = await google_sso.verify_and_process(request)
+        
+        # Validate required user info from Google
+        if not user_info or not user_info.email or not user_info.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid user information received from Google",
+            )
+            
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Google authentication failed: {str(e)}",
         )
 
-    # Check if user exists
+    # First, check if user exists by OAuth provider and ID
     user = AuthService.get_user_by_oauth(db, "google", user_info.id)
     is_new_user = False
 
     if not user:
-        # Create new user
-        is_new_user = True
-        user = User(
-            email=user_info.email,
-            username=user_info.email.split("@")[0],  # Simple username from email
-            full_name=user_info.display_name,
-            oauth_provider="google",
-            oauth_id=user_info.id,
-            is_active=True,
-            is_verified=True,  # Google users are pre-verified
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        # Check if a user already exists with this email but different provider
+        existing_user = AuthService.get_user_by_email(db, user_info.email)
+        
+        if existing_user:
+            # Link Google account to existing user
+            existing_user.oauth_provider = "google"
+            existing_user.oauth_id = user_info.id
+            existing_user.is_verified = True
+            db.commit()
+            user = existing_user
+        else:
+            # Create new user with unique username handling
+            base_username = user_info.email.split("@")[0]
+            username = AuthService.generate_unique_username(db, base_username)
+            
+            is_new_user = True
+            user = User(
+                email=user_info.email,
+                username=username,
+                full_name=user_info.display_name,
+                oauth_provider="google",
+                oauth_id=user_info.id,
+                is_active=True,
+                is_verified=True,  # Google users are pre-verified
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
 
-        # Send welcome email for new users
-        from app.services.email import EmailService
-        email_service = EmailService()
-        email_service.send_account_activation_email(user.email, user.username)
+            # Send welcome email for new users
+            try:
+                from app.services.email import EmailService
+                email_service = EmailService()
+                email_service.send_account_activation_email(user.email, user.username)
+            except Exception as e:
+                # Log the error but don't fail the authentication
+                print(f"Failed to send welcome email: {str(e)}")
+
+    # Ensure user is active and verified for OAuth users
+    if not user.is_active:
+        user.is_active = True
+        db.commit()
+    
+    if not user.is_verified:
+        user.is_verified = True
+        db.commit()
 
     # Generate tokens
     access_token = AuthService.create_access_token(user.id)
