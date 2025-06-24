@@ -24,11 +24,11 @@ git pull origin main
 
 # Stop existing containers gracefully
 echo "🛑 Stopping existing containers..."
-docker-compose -f docker-compose.prod.yml down || echo "No containers to stop"
+docker compose -f docker-compose.prod.yml down || echo "No containers to stop"
 
 # Build and start new containers
 echo "🔨 Building and starting containers..."
-docker-compose -f docker-compose.prod.yml up --build -d
+docker compose -f docker-compose.prod.yml up --build -d
 
 # Wait for container to be ready
 echo "⏳ Waiting for API to be ready..."
@@ -43,7 +43,7 @@ for i in {1..30}; do
     fi
     if [ $i -eq 30 ]; then
         echo "❌ API health check failed after 30 attempts"
-        docker-compose -f docker-compose.prod.yml logs api
+        docker compose -f docker-compose.prod.yml logs api
         exit 1
     fi
     sleep 2

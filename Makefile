@@ -18,45 +18,45 @@ help:
 
 # Development commands
 build:
-	docker-compose build
+	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 logs-api:
-	docker-compose logs -f api
+	docker compose logs -f api
 
 shell:
-	docker-compose exec api bash
+	docker compose exec api bash
 
 test:
-	docker-compose exec api pytest tests/ -v
+	docker compose exec api pytest tests/ -v
 
 migrate:
-	docker-compose exec api alembic upgrade head
+	docker compose exec api alembic upgrade head
 
 seed:
-	docker-compose exec api python seed_data/seed_llm_models.py
+	docker compose exec api python seed_data/seed_llm_models.py
 
 clean:
-	docker-compose down -v --remove-orphans
+	docker compose down -v --remove-orphans
 	docker system prune -f
 
 # Production commands
 prod-up:
-	docker-compose -f docker-compose.prod.yml up --build -d
+	docker compose -f docker-compose.prod.yml up --build -d
 
 prod-down:
-	docker-compose -f docker-compose.prod.yml down
+	docker compose -f docker-compose.prod.yml down
 
 prod-logs:
-	docker-compose -f docker-compose.prod.yml logs -f
+	docker compose -f docker-compose.prod.yml logs -f
 
 # Development workflow
 dev-setup: build up migrate seed
@@ -72,4 +72,4 @@ health:
 	@echo "Checking API health..."
 	@curl -f http://localhost:8000/ || echo "API is not responding"
 	@echo "\nChecking database..."
-	@docker-compose exec db pg_isready -U bitewise -d bitewise_dev || echo "Database is not ready" 
+	@docker compose exec db pg_isready -U bitewise -d bitewise_dev || echo "Database is not ready" 

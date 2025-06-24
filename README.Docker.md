@@ -43,13 +43,13 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 
 ```bash
 # Start all services (API + PostgreSQL + Redis)
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f api
+docker compose logs -f api
 
 # Stop services
-docker-compose down
+docker compose down
 ```
 
 The API will be available at:
@@ -92,10 +92,10 @@ EMAIL_FROM=<your-production-email>
 
 ```bash
 # Build and start production API
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # View logs
-docker-compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f api
 ```
 
 ### 3. Your Existing Nginx Configuration
@@ -127,10 +127,10 @@ Migrations run automatically when the container starts. To run them manually:
 
 ```bash
 # Run migrations
-docker-compose -f docker-compose.prod.yml exec api alembic upgrade head
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 
 # Create new migration
-docker-compose -f docker-compose.prod.yml exec api alembic revision --autogenerate -m "description"
+docker compose -f docker-compose.prod.yml exec api alembic revision --autogenerate -m "description"
 ```
 
 ## Docker Commands Reference
@@ -151,33 +151,33 @@ docker build --no-cache -t bitewise-api .
 # Start production services
 make prod-up
 # or
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Stop production services
 make prod-down
 # or
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml down
 
 # View production logs
 make prod-logs
 # or
-docker-compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f api
 
 # Enter production container
-docker-compose -f docker-compose.prod.yml exec api bash
+docker compose -f docker-compose.prod.yml exec api bash
 ```
 
 ### Debugging
 
 ```bash
 # Check container status
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # View detailed logs
-docker-compose -f docker-compose.prod.yml logs --tail=100 api
+docker compose -f docker-compose.prod.yml logs --tail=100 api
 
 # Restart API service
-docker-compose -f docker-compose.prod.yml restart api
+docker compose -f docker-compose.prod.yml restart api
 
 # Check resource usage
 docker stats bitewise-api-prod
@@ -204,7 +204,7 @@ docker stats bitewise-api-prod
 1. **API Not Accessible Through Nginx**
    ```bash
    # Check if API container is running
-   docker-compose -f docker-compose.prod.yml ps
+   docker compose -f docker-compose.prod.yml ps
    
    # Test direct API access
    curl http://localhost:8000/
@@ -219,10 +219,10 @@ docker stats bitewise-api-prod
 2. **Database Connection Error**
    ```bash
    # Check environment variables
-   docker-compose -f docker-compose.prod.yml exec api env | grep DATABASE
+   docker compose -f docker-compose.prod.yml exec api env | grep DATABASE
    
    # Test database connection
-   docker-compose -f docker-compose.prod.yml exec api python -c "
+   docker compose -f docker-compose.prod.yml exec api python -c "
    from app.db.session import engine
    print('Database connection:', engine.url)
    "
@@ -277,7 +277,7 @@ cp env.example .env
 # Edit .env with production values
 
 # 3. Deploy
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # 4. Verify
 curl https://bitewise.twiggle.tech/api/v1/
@@ -290,26 +290,26 @@ curl https://bitewise.twiggle.tech/api/v1/
 git pull origin main
 
 # 2. Rebuild and restart
-docker-compose -f docker-compose.prod.yml up --build -d
+docker compose -f docker-compose.prod.yml up --build -d
 
 # 3. Check logs
-docker-compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f api
 
 # 4. Run any new migrations
-docker-compose -f docker-compose.prod.yml exec api alembic upgrade head
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 ```
 
 ### Backup and Monitoring
 
 ```bash
 # View logs
-docker-compose -f docker-compose.prod.yml logs --tail=100 api
+docker compose -f docker-compose.prod.yml logs --tail=100 api
 
 # Monitor resources
 docker stats bitewise-api-prod
 
 # Backup logs
-docker-compose -f docker-compose.prod.yml logs api > api-logs-$(date +%Y%m%d).log
+docker compose -f docker-compose.prod.yml logs api > api-logs-$(date +%Y%m%d).log
 ```
 
 ## Security Notes
