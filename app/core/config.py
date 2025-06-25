@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     # Google OAuth
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
-    GOOGLE_CALLBACK_URL: str = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8080/auth/google/callback")
+    GOOGLE_CALLBACK_URL: str = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/api/v1/auth/google/callback")
+    
+    # Frontend
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:8080")
     
     # OpenAI API
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")

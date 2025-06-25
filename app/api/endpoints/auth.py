@@ -26,7 +26,6 @@ from app.schemas.auth import (
     UserRegister,
     UserRegisterResponse,
     GoogleLoginUrlResponse,
-    GoogleCallbackRequest,
 )
 from app.services.auth import AuthService, get_current_active_user
 
@@ -193,19 +192,33 @@ async def google_login(
     """
     Generates Google OAuth authorization URL for user authentication.
     Returns a JSON response with the authorization URL - never redirects.
-    """
-    # Generate state if not provided
-    if not state:
-        import secrets
-        state = secrets.token_urlsafe(32)
     
-    # Use redirect_uri from parameter or default from settings
-    final_redirect_uri = redirect_uri or settings.GOOGLE_CALLBACK_URL
+    Args:
+        redirect_uri: The frontend URL where user should be redirected after successful authentication
+                     (e.g., 'http://localhost:8080/dashboard', NOT the backend callback URL)
+        state: Optional state parameter for CSRF protection
+    """
+    # Validate that redirect_uri is not the backend callback URL
+    if redirect_uri and redirect_uri == settings.GOOGLE_CALLBACK_URL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="redirect_uri should be your frontend URL, not the backend callback URL"
+        )
+    
+    # The redirect_uri parameter here is the FRONTEND redirect URL where user should end up
+    # The actual Google OAuth redirect_uri is always our backend callback
+    frontend_redirect_uri = redirect_uri or f"{settings.FRONTEND_URL}/dashboard"
+    
+    # Use the frontend redirect URI as the state parameter if no state provided
+    # This way we can redirect back to the correct frontend page after authentication
+    if not state:
+        state = frontend_redirect_uri
     
     # Use fastapi_sso to generate the login redirect
+    # Always use the backend callback URL for Google OAuth redirect_uri
     async with google_sso:
         redirect_response = await google_sso.get_login_redirect(
-            redirect_uri=final_redirect_uri,
+            redirect_uri=settings.GOOGLE_CALLBACK_URL,
             state=state,
             params={
                 "prompt": "consent", 
@@ -222,7 +235,7 @@ async def google_login(
     )
 
 
-@router.get("/google/callback", response_model=GoogleLoginResponse)
+@router.get("/google/callback")
 async def google_callback_get(
     request: Request,
     db: Session = Depends(get_db)
@@ -230,6 +243,7 @@ async def google_callback_get(
     """
     Handles the Google OAuth callback via GET redirect from Google.
     This is the traditional OAuth flow where Google redirects directly to this endpoint.
+    Redirects user back to frontend with authentication tokens.
     """
     try:
         # Use fastapi_sso to verify and process the callback
@@ -237,43 +251,54 @@ async def google_callback_get(
             google_user = await google_sso.verify_and_process(request)
         
         if not google_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to verify Google authentication"
+            # Redirect to frontend with error
+            frontend_url = request.query_params.get("state") or settings.FRONTEND_URL
+            return RedirectResponse(
+                url=f"{frontend_url}?error=authentication_failed",
+                status_code=302
             )
         
         # Process the user data
-        return await _process_google_user(google_user, db)
+        auth_response = await _process_google_user(google_user, db)
         
-    except HTTPException:
-        raise
+        # Extract the original redirect URI from state or use default
+        redirect_uri = request.query_params.get("state") or f"{settings.FRONTEND_URL}/dashboard"
+        
+        # Create redirect URL with tokens
+        redirect_url = (
+            f"{redirect_uri}"
+            f"?access_token={auth_response.access_token}"
+            f"&refresh_token={auth_response.refresh_token}"
+            f"&token_type={auth_response.token_type}"
+            f"&expires_in={auth_response.expires_in}"
+            f"&user_id={auth_response.user_id}"
+            f"&email={auth_response.email}"
+            f"&username={auth_response.username}"
+            f"&provider={auth_response.provider}"
+            f"&first_login={str(auth_response.first_login).lower()}"
+            f"&profile_complete={str(auth_response.profile_complete).lower()}"
+            f"&is_new_user={str(auth_response.is_new_user).lower()}"
+        )
+        
+        return RedirectResponse(url=redirect_url, status_code=302)
+        
+    except HTTPException as e:
+        # Redirect to frontend with error
+        frontend_url = request.query_params.get("state") or settings.FRONTEND_URL
+        return RedirectResponse(
+            url=f"{frontend_url}?error={e.detail}",
+            status_code=302
+        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Google authentication failed: {str(e)}",
+        # Redirect to frontend with error
+        frontend_url = request.query_params.get("state") or settings.FRONTEND_URL
+        return RedirectResponse(
+            url=f"{frontend_url}?error=authentication_failed",
+            status_code=302
         )
 
 
-@router.post("/google/callback", response_model=GoogleLoginResponse)
-async def google_callback_post(
-    callback_data: GoogleCallbackRequest,
-    db: Session = Depends(get_db)
-) -> Any:
-    """
-    Handles the Google OAuth callback via POST request from frontend.
-    This is for frontend applications that capture the callback and send it as API call.
-    """
-    try:
-        # For POST requests, we need to manually create a request-like object
-        # or handle the code exchange manually since fastapi_sso expects a Request object
-        return await _process_google_callback_manual(callback_data.code, callback_data.state, db)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Google authentication failed: {str(e)}",
-        )
+
 
 
 async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResponse:
@@ -371,64 +396,6 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
     )
 
 
-async def _process_google_callback_manual(code: str, state: Optional[str], db: Session) -> GoogleLoginResponse:
-    """
-    Manual processing for POST callback requests where we can't use fastapi_sso's verify_and_process.
-    """
-    # Exchange authorization code for access token with Google
-    import httpx
-    
-    token_url = "https://oauth2.googleapis.com/token"
-    token_data = {
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": settings.GOOGLE_CALLBACK_URL,
-    }
-    
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(token_url, data=token_data)
-        
-    if token_response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to exchange authorization code for access token"
-        )
-        
-    token_info = token_response.json()
-    access_token = token_info.get("access_token")
-    
-    if not access_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No access token received from Google"
-        )
-    
-    # Get user info from Google
-    user_info_url = f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
-    
-    async with httpx.AsyncClient() as client:
-        user_response = await client.get(user_info_url)
-        
-    if user_response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to fetch user information from Google"
-        )
-        
-    user_info = user_response.json()
-    
-    # Create a simple user object similar to what fastapi_sso would return
-    class GoogleUserInfo:
-        def __init__(self, data):
-            self.id = data.get("id")
-            self.email = data.get("email")
-            self.name = data.get("name", "")
-            self.display_name = data.get("name", "")
-    
-    google_user = GoogleUserInfo(user_info)
-    return await _process_google_user(google_user, db)
 
 
 @router.post("/refresh", response_model=Token)
