@@ -76,13 +76,29 @@ class RefreshTokenRequest(BaseModel):
 
 
 # Social login response schema
+class GoogleLoginUrlResponse(BaseModel):
+    authorization_url: str
+    state: str
+
+
 class GoogleLoginResponse(BaseModel):
     access_token: str
     token_type: str
     expires_in: int
     refresh_token: str
     user_id: str
+    email: str
+    username: str
+    provider: str = "google"
+    first_login: bool
+    profile_complete: bool
     is_new_user: bool
+
+
+# Google OAuth callback request schema
+class GoogleCallbackRequest(BaseModel):
+    code: str
+    state: str
 
 
 # Password reset schemas

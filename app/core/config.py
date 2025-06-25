@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     GOOGLE_CALLBACK_URL: str = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/api/v1/auth/google/callback")
     
+    # Frontend
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:8080")
+    
     # OpenAI API
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     
@@ -48,7 +51,7 @@ class Settings(BaseSettings):
     YOUTUBE_V3_API_KEY: str = os.getenv("YOUTUBE_V3_API_KEY", "")
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "https://bitewise-delta.vercel.app"]
+    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "http://localhost:8080", "https://bitewise-delta.vercel.app", "https://bitewise.twiggle.tech"]
     
     # Database
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")

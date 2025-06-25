@@ -18,6 +18,7 @@ from app.schemas.intake import (
     DishDetail,
     NutritionalSummary
 )
+from app.utils.search import SearchUtils
 
 
 class IntakeService:
@@ -124,22 +125,21 @@ class IntakeService:
     @staticmethod
     def create_intake_by_name(db: Session, intake_data: IntakeCreateByName, current_user_id: int) -> IntakeResponse:
         """Create a new intake record using dish name."""
-        # Search for dish by name using exact match first, then partial match
-        dish = db.query(Dish).filter(Dish.name.ilike(intake_data.dish_name)).first()
+        # Use the new fuzzy search to find the best matching dish
+        best_dish, score = SearchUtils.find_best_dish_by_name(
+            db=db,
+            dish_name=intake_data.dish_name
+        )
         
-        if not dish:
-            # Try partial match if exact match fails
-            dish = db.query(Dish).filter(Dish.name.ilike(f"%{intake_data.dish_name}%")).first()
-        
-        if not dish:
+        if not best_dish:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Dish with name '{intake_data.dish_name}' not found"
+                detail=f"No suitable dish found matching '{intake_data.dish_name}'. Please try a different search term or create the dish first."
             )
         
         # Convert to IntakeCreate using the found dish_id
         intake_create_data = IntakeCreate(
-            dish_id=dish.id,
+            dish_id=best_dish.id,
             intake_time=intake_data.intake_time,
             portion_size=intake_data.portion_size,
             water_ml=intake_data.water_ml
