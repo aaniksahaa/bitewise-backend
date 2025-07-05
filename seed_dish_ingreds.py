@@ -531,7 +531,7 @@ def main():
     
     # Force reload environment variables to ensure we use current settings
     reload_environment()
-    
+
     # File paths
     ingredients_file = "seed_data/final/ingredients.json"
     dishes_file = "seed_data/final/dishes.json"
@@ -545,27 +545,84 @@ def main():
         print(f"Error: Dishes file not found: {dishes_file}")
         return False
 
+    # Initialize database connection early to check connectivity and show info
+    print("\nInitializing database connection...")
+    seeder = DatabaseSeeder()
+    
     try:
-        with DatabaseSeeder() as seeder:
-            # Load ingredients first (required for dishes)
-            if not seeder.load_ingredients(ingredients_file):
-                print("Failed to load ingredients. Stopping.")
-                seeder.print_summary()
-                return False
+        # Manually call the initialization that normally happens in __enter__
+        from app.db.session import SessionLocal
+        from app.models.ingredient import Ingredient
+        from app.models.dish import Dish
+        from app.models.dish_ingredient import DishIngredient
+        from app.models.user import User
+        
+        # Store the imports as class attributes
+        seeder.SessionLocal = SessionLocal
+        seeder.Ingredient = Ingredient
+        seeder.Dish = Dish
+        seeder.DishIngredient = DishIngredient
+        seeder.User = User
+        
+        # Create database session
+        seeder.db = SessionLocal()
+        
+        # Check current database state
+        current_ingredients = seeder.db.query(Ingredient).count()
+        current_dishes = seeder.db.query(Dish).count()
+        current_relationships = seeder.db.query(DishIngredient).count()
+        
+        print(f"✅ Database connection successful!")
+        print(f"📊 Current database state:")
+        print(f"   - Ingredients: {current_ingredients}")
+        print(f"   - Dishes: {current_dishes}")
+        print(f"   - Dish-Ingredient relationships: {current_relationships}")
+        print(f"📁 Files to process:")
+        print(f"   - Ingredients file: {ingredients_file}")
+        print(f"   - Dishes file: {dishes_file}")
+        
+        # Get confirmation from user
+        print("\n" + "="*60)
+        confirmation = input("🚀 Do you want to continue with database seeding? (yes/y to continue): ").strip().lower()
+        
+        if confirmation not in ['yes', 'y']:
+            print("❌ Seeding cancelled by user.")
+            seeder.db.close()
+            return False
+            
+        print("✅ Proceeding with database seeding...\n")
+        
+    except Exception as e:
+        print(f"❌ Error initializing database connection: {str(e)}")
+        print("Please check your database configuration and try again.")
+        if seeder.db:
+            seeder.db.close()
+        return False
 
-            # Load dishes and their ingredient relationships
-            if not seeder.load_dishes(dishes_file):
-                print("Failed to load dishes.")
-                seeder.print_summary()
-                return False
-
-            # Print final summary
+    try:
+        # Load ingredients first (required for dishes)
+        if not seeder.load_ingredients(ingredients_file):
+            print("Failed to load ingredients. Stopping.")
             seeder.print_summary()
-            return True
+            return False
+
+        # Load dishes and their ingredient relationships
+        if not seeder.load_dishes(dishes_file):
+            print("Failed to load dishes.")
+            seeder.print_summary()
+            return False
+
+        # Print final summary
+        seeder.print_summary()
+        return True
 
     except Exception as e:
         print(f"Unexpected error during seeding: {str(e)}")
         return False
+    finally:
+        # Ensure database connection is closed
+        if seeder.db:
+            seeder.db.close()
 
 
 if __name__ == "__main__":

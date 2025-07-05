@@ -4,16 +4,23 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
+print("\n\nAt session.py")
+print("ENVIRONMENT: ", settings.ENVIRONMENT)
+
 if settings.ENVIRONMENT == "development":
+    print("\n***USING LOCAL DATABASE URL***\n")
     db_url = settings.LOCAL_DATABASE_URL
 else:
+    print("\n***USING PRODUCTION DATABASE URL***\n")
     db_url = settings.DATABASE_URL
 
 # Replace any escaped colons in the URL
 if db_url:
     db_url = db_url.replace("\\x3a", ":")
 
-print(db_url)
+print("DB_URL: ", db_url)
+
+print("\n\n")
 
 engine = create_engine(db_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

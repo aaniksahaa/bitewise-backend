@@ -3,7 +3,7 @@ import sys
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 # Add the app directory to the python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,6 +37,35 @@ def get_url():
     if settings.ENVIRONMENT == "development":
         return settings.LOCAL_DATABASE_URL
     return settings.DATABASE_URL
+
+def create_version_table_if_needed(connection):
+    """Create custom alembic_version table with longer character limit if it doesn't exist, 
+    or modify it if it exists with wrong column size"""
+    # Check if table exists
+    inspector = connection.dialect.get_table_names(connection)
+    if 'alembic_version' not in inspector:
+        # Create the table with longer version_num column
+        connection.execute(text("""
+            CREATE TABLE alembic_version (
+                version_num VARCHAR(100) NOT NULL PRIMARY KEY
+            )
+        """))
+    else:
+        # Check if column size is correct
+        result = connection.execute(text("""
+            SELECT character_maximum_length 
+            FROM information_schema.columns 
+            WHERE table_name = 'alembic_version' 
+            AND column_name = 'version_num'
+        """))
+        current_length = result.fetchone()
+        if current_length and current_length[0] < 100:
+            # Alter the column to have longer length
+            connection.execute(text("""
+                ALTER TABLE alembic_version 
+                ALTER COLUMN version_num TYPE VARCHAR(100)
+            """))
+            connection.commit()
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -78,8 +107,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Create custom version table if needed
+        create_version_table_if_needed(connection)
+        
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, 
+            target_metadata=target_metadata,
         )
 
         with context.begin_transaction():
