@@ -1,3 +1,12 @@
+
+# Way 1: With SQL DUMP file
+
+
+psql conn_string < seed_data/bitewise_db_backup.sql
+
+
+# Way 2: Without SQL DUMP file
+
 ## Create New Database in DBeaver
 
 1. **Open DBeaver** and connect to your local PostgreSQL server
