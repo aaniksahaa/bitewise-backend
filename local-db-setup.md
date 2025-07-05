@@ -1,11 +1,24 @@
 
 # Way 1: With SQL DUMP file
 
+## May create new db in bash command
+
+PGPASSWORD=BITEWISE321 createdb -U bitewise -h localhost -p 5432 bitewise_new
+
+conn string is like:
+
+psql postgresql://bitewise:BITEWISE321@localhost:5432/bitewise_new
+
+psql postgresql://bitewise:BITEWISE321@localhost:5432/bitewise_new < seed_data/bitewise_db_backup.sql
 
 psql conn_string < seed_data/bitewise_db_backup.sql
 
 
 # Way 2: Without SQL DUMP file
+
+## May create new db in bash command
+
+PGPASSWORD=BITEWISE321 createdb -U bitewise -h localhost -p 5432 bitewise_new
 
 ## Create New Database in DBeaver
 
