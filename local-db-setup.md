@@ -1,9 +1,18 @@
 
 # Way 1: With SQL DUMP file
 
+## If needed, Drop the database
+
+PGPASSWORD=BITEWISE321 dropdb -U bitewise -h localhost bitewise_tt
+
 ## May create new db in bash command
 
-PGPASSWORD=BITEWISE321 createdb -U bitewise -h localhost -p 5432 bitewise_new
+PGPASSWORD=BITEWISE321 createdb -U bitewise -h localhost -p 5432 bitewise_tt
+
+# Load the SQL dump
+
+PGPASSWORD=BITEWISE321 psql -U bitewise -h localhost -d bitewise_dev < seed_data/bitewise_db_backup.sql
+
 
 conn string is like:
 
@@ -16,9 +25,13 @@ psql conn_string < seed_data/bitewise_db_backup.sql
 
 # Way 2: Without SQL DUMP file
 
+## If needed, Drop the database
+
+PGPASSWORD=BITEWISE321 dropdb -U bitewise -h localhost bitewise_tt
+
 ## May create new db in bash command
 
-PGPASSWORD=BITEWISE321 createdb -U bitewise -h localhost -p 5432 bitewise_new
+PGPASSWORD=BITEWISE321 createdb -U bitewise -h localhost -p 5432 bitewise_tt
 
 ## Create New Database in DBeaver
 
