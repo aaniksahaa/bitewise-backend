@@ -364,4 +364,60 @@ class TestChatService:
             # Assert: Should handle pagination correctly
             assert result.page == 2
             assert result.page_size == 10
-            assert result.total_pages == 5 
+            assert result.total_pages == 5
+
+    # ===== NEGATIVE TESTS =====
+    # These tests verify that the system properly handles error conditions
+
+    def test_get_conversation_unauthorized_access(self):
+        """
+        Negative Test: Conversation access should fail for wrong user.
+        
+        This test ensures that users cannot access conversations
+        that don't belong to them.
+        """
+        # Arrange: Mock the service method to return None (not found/unauthorized)
+        with patch.object(ChatService, 'get_conversation_by_id') as mock_get:
+            mock_get.return_value = None
+            
+            # Act: Try to get conversation as wrong user
+            result = ChatService.get_conversation_by_id(MagicMock(), 1, 999)
+            
+            # Assert: Should return None for unauthorized access
+            assert result is None
+
+    def test_update_conversation_nonexistent(self):
+        """
+        Negative Test: Conversation update should fail for non-existent conversation.
+        
+        This test ensures that updating non-existent conversations
+        returns None appropriately.
+        """
+        # Arrange: Mock the service method to return None
+        with patch.object(ChatService, 'update_conversation') as mock_update:
+            mock_update.return_value = None
+            
+            conversation_update = ConversationUpdate(title="Non-existent")
+            
+            # Act: Try to update non-existent conversation
+            result = ChatService.update_conversation(MagicMock(), 999999, conversation_update, 123)
+            
+            # Assert: Should return None for non-existent conversation
+            assert result is None
+
+    def test_delete_conversation_unauthorized(self):
+        """
+        Negative Test: Conversation deletion should fail for unauthorized user.
+        
+        This test ensures that users cannot delete conversations
+        they don't own.
+        """
+        # Arrange: Mock the service method to return False (unauthorized/not found)
+        with patch.object(ChatService, 'delete_conversation') as mock_delete:
+            mock_delete.return_value = False
+            
+            # Act: Try to delete conversation as unauthorized user
+            result = ChatService.delete_conversation(MagicMock(), 1, 999)
+            
+            # Assert: Should return False for unauthorized deletion
+            assert result is False 

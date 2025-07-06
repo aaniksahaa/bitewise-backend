@@ -300,4 +300,73 @@ class TestUserProfileService:
         with pytest.raises(Exception) as exc_info:
             UserProfileService.create_profile(mock_db, 123, profile_data)
         
-        assert "Database error" in str(exc_info.value) 
+        assert "Database error" in str(exc_info.value)
+
+    # ===== NEGATIVE TESTS =====
+    # These tests verify that the system properly handles error conditions
+
+    def test_create_profile_duplicate_user(self):
+        """
+        Negative Test: Profile creation should fail for existing user.
+        
+        This test ensures that attempting to create a duplicate profile
+        for a user raises an appropriate error.
+        """
+        # Arrange: Mock database with existing profile
+        mock_db = MagicMock()
+        existing_profile = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = existing_profile
+        
+        profile_data = UserProfileCreate(
+            first_name="John",
+            last_name="Doe",
+            gender=GenderType.male,
+            height_cm=Decimal("180.0"),
+            weight_kg=Decimal("75.0"),
+            date_of_birth=date(1990, 1, 1)
+        )
+        
+        # Act & Assert: Should raise HTTPException for duplicate profile
+        with pytest.raises(HTTPException) as exc_info:
+            UserProfileService.create_profile(mock_db, 123, profile_data)
+        
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Profile already exists" in exc_info.value.detail
+
+    def test_get_profile_nonexistent_user(self):
+        """
+        Negative Test: Profile retrieval should fail for non-existent user.
+        
+        This test ensures that getting a profile for a non-existent user
+        raises an appropriate 404 error.
+        """
+        # Arrange: Mock database with no profile found
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        
+        # Act & Assert: Should raise HTTPException for missing profile
+        with pytest.raises(HTTPException) as exc_info:
+            UserProfileService.get_profile(mock_db, 999)
+        
+        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert "Profile not found" in exc_info.value.detail
+
+    def test_update_profile_unauthorized_access(self):
+        """
+        Negative Test: Profile update should fail for wrong user.
+        
+        This test ensures that users cannot update profiles
+        that don't belong to them.
+        """
+        # Arrange: Mock database with no profile for the requesting user
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        
+        profile_update = UserProfileUpdate(first_name="Hacker")
+        
+        # Act & Assert: Should raise HTTPException for unauthorized access
+        with pytest.raises(HTTPException) as exc_info:
+            UserProfileService.update_profile(mock_db, 999, profile_update)
+        
+        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert "Profile not found" in exc_info.value.detail 

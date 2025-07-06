@@ -247,4 +247,76 @@ class TestEmailService:
             assert "font-family: Arial, sans-serif" in html_content
             assert "max-width: 600px" in html_content
             assert "<strong>123456</strong>" in html_content
-            assert "Hi testuser," in html_content 
+            assert "Hi testuser," in html_content
+
+    # ===== NEGATIVE TESTS =====
+    # These tests verify that the system properly handles error conditions
+
+    def test_send_email_with_empty_recipient(self):
+        """
+        Negative Test: Email sending should handle empty recipient gracefully.
+        
+        This test ensures that emails with empty recipients
+        are handled appropriately.
+        """
+        # Arrange: Mock the Resend API to raise an error
+        with patch('resend.Emails.send') as mock_send:
+            mock_send.side_effect = Exception("Invalid recipient")
+            
+            email_service = EmailService()
+            
+            # Act & Assert: Should handle empty recipient error
+            with pytest.raises(Exception) as exc_info:
+                email_service.send_email(
+                    to_email="",  # Empty email
+                    subject="Test Subject",
+                    html_content="<h1>Test Content</h1>"
+                )
+            
+            assert "Invalid recipient" in str(exc_info.value)
+
+    def test_send_verification_email_with_missing_parameters(self):
+        """
+        Negative Test: Verification email should handle missing parameters.
+        
+        This test ensures that missing required parameters
+        are handled appropriately.
+        """
+        # Arrange: Mock the send_email method to raise an error
+        with patch.object(EmailService, 'send_email') as mock_send_email:
+            mock_send_email.side_effect = Exception("Missing required parameter")
+            
+            email_service = EmailService()
+            
+            # Act & Assert: Should handle missing parameters
+            with pytest.raises(Exception) as exc_info:
+                email_service.send_verification_email(
+                    to_email=None,  # Missing email
+                    otp="123456",
+                    username="testuser"
+                )
+            
+            assert "Missing required parameter" in str(exc_info.value)
+
+    def test_email_service_api_failure(self):
+        """
+        Negative Test: Email service should handle API failures.
+        
+        This test ensures that external API failures
+        are handled gracefully.
+        """
+        # Arrange: Mock the Resend API to fail
+        with patch('resend.Emails.send') as mock_send:
+            mock_send.side_effect = Exception("API service unavailable")
+            
+            email_service = EmailService()
+            
+            # Act & Assert: Should handle API failure
+            with pytest.raises(Exception) as exc_info:
+                email_service.send_email(
+                    to_email="test@example.com",
+                    subject="Test Subject",
+                    html_content="<h1>Test Content</h1>"
+                )
+            
+            assert "API service unavailable" in str(exc_info.value) 

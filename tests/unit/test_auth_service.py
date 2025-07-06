@@ -360,4 +360,57 @@ class TestAuthServiceCore:
         # Assert: Password should be updated and verifiable
         assert hasattr(mock_user, 'hashed_password')
         assert AuthService.verify_password(new_password, mock_user.hashed_password)
-        mock_db.commit.assert_called_once() 
+        mock_db.commit.assert_called_once()
+
+    # ===== NEGATIVE TESTS =====
+    # These tests verify that the system properly handles error conditions
+
+    def test_password_verification_with_wrong_password(self):
+        """
+        Negative Test: Password verification should fail with wrong password.
+        
+        This test ensures that incorrect passwords are properly rejected
+        during verification.
+        """
+        # Arrange: Hash a password
+        correct_password = "correct_password123"
+        hashed = AuthService.get_password_hash(correct_password)
+        
+        # Act & Assert: Wrong password should fail verification
+        wrong_password = "wrong_password456"
+        assert AuthService.verify_password(wrong_password, hashed) is False
+
+    def test_jwt_token_validation_with_invalid_token(self):
+        """
+        Negative Test: JWT token validation should fail with malformed token.
+        
+        This test ensures that invalid or malformed tokens are rejected
+        and raise appropriate exceptions.
+        """
+        # Arrange: Invalid token
+        invalid_token = "invalid.malformed.token"
+        mock_db = MagicMock()
+        
+        # Act & Assert: Should raise HTTPException for invalid token
+        with pytest.raises(HTTPException) as exc_info:
+            AuthService.get_current_user(mock_db, invalid_token)
+        
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+        assert "Could not validate credentials" in exc_info.value.detail
+
+    def test_otp_verification_with_expired_or_invalid_otp(self):
+        """
+        Negative Test: OTP verification should fail with invalid OTP.
+        
+        This test ensures that non-existent or invalid OTPs are rejected
+        and return None appropriately.
+        """
+        # Arrange: Mock database with no OTP found
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        
+        # Act: Try to verify invalid OTP
+        result = AuthService.verify_otp(mock_db, "test@example.com", "999999", "login")
+        
+        # Assert: Should return None for invalid OTP
+        assert result is None 

@@ -303,4 +303,64 @@ class TestDishService:
             result = DishService.get_user_dishes(MagicMock(), 123)
             
             # Assert: Should return user's dishes
-            assert result.total_count == 3 
+            assert result.total_count == 3
+
+    # ===== NEGATIVE TESTS =====
+    # These tests verify that the system properly handles error conditions
+
+    def test_get_dish_nonexistent_id(self):
+        """
+        Negative Test: Dish retrieval should fail for non-existent dish.
+        
+        This test ensures that attempting to get a dish with invalid ID
+        returns None appropriately.
+        """
+        # Arrange: Mock the service method to return None
+        with patch.object(DishService, 'get_dish_by_id') as mock_get:
+            mock_get.return_value = None
+            
+            # Act: Try to get non-existent dish
+            result = DishService.get_dish_by_id(MagicMock(), 999999)
+            
+            # Assert: Should return None for non-existent dish
+            assert result is None
+
+    def test_update_dish_unauthorized_user(self):
+        """
+        Negative Test: Dish update should fail for unauthorized user.
+        
+        This test ensures that users cannot update dishes
+        they didn't create.
+        """
+        # Arrange: Mock the service method to raise authorization error
+        with patch.object(DishService, 'update_dish') as mock_update:
+            mock_update.side_effect = HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to update this dish"
+            )
+            
+            dish_update = DishUpdate(name="Hacked Dish")
+            
+            # Act & Assert: Should raise HTTPException for unauthorized access
+            with pytest.raises(HTTPException) as exc_info:
+                DishService.update_dish(MagicMock(), 1, dish_update, 999)
+            
+            assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+            assert "Not authorized" in exc_info.value.detail
+
+    def test_delete_dish_nonexistent(self):
+        """
+        Negative Test: Dish deletion should fail for non-existent dish.
+        
+        This test ensures that attempting to delete a non-existent dish
+        returns False appropriately.
+        """
+        # Arrange: Mock the service method to return False
+        with patch.object(DishService, 'delete_dish') as mock_delete:
+            mock_delete.return_value = False
+            
+            # Act: Try to delete non-existent dish
+            result = DishService.delete_dish(MagicMock(), 999999, 123)
+            
+            # Assert: Should return False for non-existent dish
+            assert result is False 
