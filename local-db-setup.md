@@ -1,3 +1,4 @@
+How to setup local DB?
 
 # Way 1: With SQL DUMP file
 
