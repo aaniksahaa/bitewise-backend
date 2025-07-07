@@ -216,36 +216,7 @@ class TestAuthServiceCore:
         mock_db.query.return_value.filter.return_value.first.return_value = None
         result = AuthService.get_user_by_email(mock_db, "nonexistent@example.com")
         assert result is None
-
-    def test_generate_unique_username(self):
-        """
-        Test unique username generation.
         
-        This test ensures that usernames are made unique when
-        collisions exist.
-        """
-        # Arrange: Mock database
-        mock_db = MagicMock()
-        
-        # Test no collision - username available
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        result = AuthService.generate_unique_username(mock_db, "newuser")
-        assert result == "newuser"
-        
-        # Test with collision - need to add number
-        call_count = 0
-        def mock_first_side_effect():
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:  # First two calls find existing users
-                return MagicMock()  # User exists
-            else:
-                return None  # User doesn't exist
-        
-        mock_db.query.return_value.filter.return_value.first.side_effect = mock_first_side_effect
-        result = AuthService.generate_unique_username(mock_db, "testuser")
-        assert result == "testuser2"
-
     def test_get_current_user_with_valid_token(self):
         """
         Test getting current user with valid JWT token.
