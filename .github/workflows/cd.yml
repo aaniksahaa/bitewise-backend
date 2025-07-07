@@ -29,7 +29,7 @@ jobs:
     
     - name: Deploy to Anik Azure VM 
       uses: appleboy/ssh-action@v0.1.7 
-      with:
+      with: 
         host: ${{ secrets.ANIK_HOST }}
         username: ${{ secrets.ANIK_USERNAME }} 
         key: ${{ secrets.ANIK_SSH_KEY }}
