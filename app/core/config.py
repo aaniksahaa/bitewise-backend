@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1 hour
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
     JWT_ALGORITHM: str = "HS256"
+    LOGIN_OTP_THRESHOLD_DAYS: int = int(os.getenv("LOGIN_OTP_THRESHOLD_DAYS", "7"))  # Require OTP if last login > 7 days ago
     
     # Email (Resend)
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")

@@ -49,6 +49,56 @@ class AuthService:
         return "".join(secrets.choice(alphabet) for _ in range(length))
 
     @classmethod
+    def is_otp_required_for_login(cls, user: User, otp_threshold_days: int = None) -> bool:
+        """
+        Check if OTP verification is required based on last login time.
+        
+        Args:
+            user: The user attempting to login
+            otp_threshold_days: Number of days since last login to require OTP (if None, uses config setting)
+            
+        Returns:
+            bool: True if OTP is required, False otherwise
+        """
+        if otp_threshold_days is None:
+            otp_threshold_days = settings.LOGIN_OTP_THRESHOLD_DAYS
+            
+        # Debug logging
+        print(f"[DEBUG] Checking OTP requirement for user {user.id}")
+        print(f"[DEBUG] User last_login_at: {user.last_login_at}")
+        print(f"[DEBUG] Threshold days: {otp_threshold_days}")
+        
+        # Always require OTP for first-time users (no previous login)
+        if not user.last_login_at:
+            print(f"[DEBUG] No previous login found - OTP required")
+            return True
+            
+        # Calculate time since last login
+        time_since_last_login = datetime.utcnow() - user.last_login_at
+        print(f"[DEBUG] Time since last login: {time_since_last_login}")
+        print(f"[DEBUG] Threshold timedelta: {timedelta(days=otp_threshold_days)}")
+        
+        # Require OTP if last login was more than threshold days ago
+        otp_required = time_since_last_login > timedelta(days=otp_threshold_days)
+        print(f"[DEBUG] OTP required: {otp_required}")
+        
+        return otp_required
+
+    @classmethod
+    def update_last_login(cls, db: Session, user_id: int) -> None:
+        """Update the user's last login timestamp."""
+        print(f"[DEBUG] Updating last_login_at for user {user_id}")
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            old_last_login = user.last_login_at
+            user.last_login_at = datetime.utcnow()
+            db.commit()
+            db.refresh(user)  # Refresh to ensure we get the updated value
+            print(f"[DEBUG] Updated last_login_at from {old_last_login} to {user.last_login_at}")
+        else:
+            print(f"[DEBUG] User {user_id} not found for last_login_at update")
+
+    @classmethod
     def generate_unique_username(cls, db: Session, base_username: str) -> str:
         """Generate a unique username by checking for collisions and appending numbers if needed."""
         username = base_username

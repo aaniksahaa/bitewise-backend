@@ -44,6 +44,17 @@ class LoginResponse(BaseModel):
     expires_in: int
 
 
+# Direct login response (when OTP is not required)
+class DirectLoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+    refresh_token: str
+    user_id: str
+    message: str
+    otp_required: bool = False
+
+
 # Login verification schemas
 class LoginVerify(BaseModel):
     login_request_id: str
