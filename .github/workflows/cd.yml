@@ -26,11 +26,12 @@ jobs:
     #       # Run deployment
     #       /home/azureuser/bitewise-backend/deploy-docker.sh
     
+    
     - name: Deploy to Anik Azure VM
       uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.ANIK_HOST }}
-        username: ${{ secrets.ANIK_USERNAME }}
+        username: ${{ secrets.ANIK_USERNAME }} 
         key: ${{ secrets.ANIK_SSH_KEY }}
         script: |
           # Make sure deploy script is executable
