@@ -1,7 +1,7 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from fastapi import HTTPException, status
 import math
 from decimal import Decimal
@@ -19,6 +19,7 @@ from app.schemas.intake import (
     NutritionalSummary
 )
 from app.utils.search import SearchUtils
+from app.utils.logger import intake_logger
 
 
 class IntakeService:
@@ -99,58 +100,128 @@ class IntakeService:
 
     @staticmethod
     def create_intake(db: Session, intake_data: IntakeCreate, current_user_id: int) -> IntakeResponse:
-        """Create a new intake record."""
-        # Verify that the dish exists
-        dish = db.query(Dish).filter(Dish.id == intake_data.dish_id).first()
-        if not dish:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Dish not found"
+        """Create a new intake record with detailed logging"""
+        intake_logger.info(f"Creating intake for user {current_user_id}", "CREATE",
+                         dish_id=intake_data.dish_id, portion_size=intake_data.portion_size)
+        
+        try:
+            # Verify dish exists
+            dish = db.query(Dish).filter(Dish.id == intake_data.dish_id).first()
+            if not dish:
+                error_msg = f"Dish with ID {intake_data.dish_id} not found"
+                intake_logger.error(error_msg, "CREATE", dish_id=intake_data.dish_id)
+                raise ValueError(error_msg)
+            
+            intake_logger.debug(f"Found dish: '{dish.name}'", "CREATE", 
+                              dish_id=dish.id, calories=dish.calories)
+            
+            # Create intake record
+            db_intake = Intake(
+                user_id=current_user_id,
+                dish_id=intake_data.dish_id,
+                portion_size=intake_data.portion_size,
+                intake_time=intake_data.intake_time,
+                water_ml=intake_data.water_ml
             )
-        
-        # Create intake with user as owner
-        db_intake = Intake(
-            user_id=current_user_id,
-            **intake_data.model_dump()
-        )
-        
-        db.add(db_intake)
-        db.commit()
-        db.refresh(db_intake)
-        
-        # Load the dish relationship and return response with dish details
-        db_intake_with_dish = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.id == db_intake.id).first()
-        return IntakeService._create_intake_response(db_intake_with_dish)
+            
+            intake_logger.debug("Adding intake to database session", "CREATE",
+                              user_id=current_user_id, dish_name=dish.name)
+            
+            db.add(db_intake)
+            
+            intake_logger.debug("Committing intake to database", "CREATE")
+            db.commit()
+            
+            intake_logger.debug("Refreshing intake from database", "CREATE")
+            db.refresh(db_intake)
+            
+            # Verify the intake was saved
+            if db_intake.id:
+                calories = dish.calories * intake_data.portion_size if dish.calories else None
+                intake_logger.success(f"✅ Intake created successfully", "CREATE",
+                                    intake_id=db_intake.id, dish_name=dish.name, 
+                                    user_id=current_user_id, calories=calories)
+                
+                # Double-check by querying it back
+                verification = db.query(Intake).filter(Intake.id == db_intake.id).first()
+                if verification:
+                    intake_logger.success("✓ Intake verified in database", "CREATE",
+                                        intake_id=db_intake.id)
+                else:
+                    intake_logger.error("✗ CRITICAL: Intake not found after commit!", "CREATE",
+                                      intake_id=db_intake.id)
+            else:
+                intake_logger.error("✗ CRITICAL: Intake created but has no ID!", "CREATE")
+            
+            return IntakeService._create_intake_response(db_intake)
+            
+        except Exception as e:
+            intake_logger.error(f"Failed to create intake: {str(e)}", "CREATE",
+                              user_id=current_user_id, dish_id=intake_data.dish_id,
+                              error=str(e))
+            db.rollback()
+            raise
 
     @staticmethod
     def create_intake_by_name(db: Session, intake_data: IntakeCreateByName, current_user_id: int) -> IntakeResponse:
-        """Create a new intake record using dish name."""
-        # Use the new fuzzy search to find the best matching dish
-        best_dish, score = SearchUtils.find_best_dish_by_name(
-            db=db,
-            dish_name=intake_data.dish_name
-        )
+        """Create a new intake record by dish name with detailed logging"""
         
-        if not best_dish:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No suitable dish found matching '{intake_data.dish_name}'. Please try a different search term or create the dish first."
+        # Start intake process with clear banner
+        intake_logger.section_start("Intake Logging", "PROCESS")
+        intake_logger.info(f"Creating intake by name for user {current_user_id}: '{intake_data.dish_name}'", 
+                         "REQUEST", portion_size=intake_data.portion_size)
+        
+        try:
+            # Search for dish by name (case-insensitive)
+            intake_logger.separator("┈", 25, "SEARCH")
+            intake_logger.debug(f"Searching for dish: '{intake_data.dish_name}'", "SEARCH")
+            
+            dish = db.query(Dish).filter(
+                func.lower(Dish.name) == func.lower(intake_data.dish_name.strip())
+            ).first()
+            
+            if not dish:
+                # Try partial match if exact match fails
+                intake_logger.debug(f"Exact match failed, trying partial match", "SEARCH")
+                dish = db.query(Dish).filter(
+                    Dish.name.ilike(f"%{intake_data.dish_name.strip()}%")
+                ).first()
+            
+            if not dish:
+                error_msg = f"Dish '{intake_data.dish_name}' not found in database"
+                intake_logger.error(error_msg, "SEARCH", dish_name=intake_data.dish_name)
+                intake_logger.section_end("Intake Logging", "PROCESS", success=False)
+                raise ValueError(error_msg)
+            
+            intake_logger.success(f"Found dish: '{dish.name}' (ID: {dish.id})", "SEARCH",
+                                dish_id=dish.id, calories=dish.calories)
+            
+            # Create IntakeCreate object
+            intake_create = IntakeCreate(
+                dish_id=dish.id,
+                portion_size=intake_data.portion_size,
+                intake_time=intake_data.intake_time,
+                water_ml=intake_data.water_ml
             )
-        
-        # Convert to IntakeCreate using the found dish_id
-        intake_create_data = IntakeCreate(
-            dish_id=best_dish.id,
-            intake_time=intake_data.intake_time,
-            portion_size=intake_data.portion_size,
-            water_ml=intake_data.water_ml
-        )
-        
-        # Use the existing create_intake method
-        return IntakeService.create_intake(
-            db=db,
-            intake_data=intake_create_data,
-            current_user_id=current_user_id
-        )
+            
+            intake_logger.separator("┈", 25, "DATABASE")
+            intake_logger.debug("Converting to IntakeCreate and calling create_intake", "DATABASE")
+            
+            # Use the regular create_intake method
+            result = IntakeService.create_intake(db, intake_create, current_user_id)
+            
+            intake_logger.success(f"✅ Intake by name completed", "PROCESS",
+                                intake_id=result.id, dish_name=dish.name)
+            
+            intake_logger.section_end("Intake Logging", "PROCESS", success=True)
+            return result
+            
+        except Exception as e:
+            intake_logger.error(f"Failed to create intake by name: {str(e)}", "ERROR",
+                              user_id=current_user_id, dish_name=intake_data.dish_name,
+                              error=str(e))
+            intake_logger.section_end("Intake Logging", "PROCESS", success=False)
+            raise
 
     @staticmethod
     def get_intake_by_id(db: Session, intake_id: int, current_user_id: int) -> Optional[IntakeResponse]:
@@ -351,3 +422,104 @@ class IntakeService:
             page=1,
             page_size=100  # Get all today's calendar day intakes without pagination
         ) 
+
+    @staticmethod
+    def get_daily_nutrition_summary(db: Session, user_id: int, target_date: date) -> dict:
+        """Get daily nutrition summary for a user with logging"""
+        intake_logger.debug(f"Calculating daily nutrition for user {user_id} on {target_date}", "SUMMARY")
+        
+        try:
+            # Get all intakes for the specified date
+            start_datetime = datetime.combine(target_date, datetime.min.time())
+            end_datetime = datetime.combine(target_date, datetime.max.time())
+            
+            intakes = db.query(Intake).filter(
+                and_(
+                    Intake.user_id == user_id,
+                    Intake.intake_time >= start_datetime,
+                    Intake.intake_time <= end_datetime
+                )
+            ).all()
+            
+            intake_logger.debug(f"Found {len(intakes)} intakes for summary", "SUMMARY", count=len(intakes))
+            
+            total_calories = 0.0
+            total_protein = 0.0
+            total_carbs = 0.0
+            total_fat = 0.0
+            total_fiber = 0.0
+            total_water = 0.0
+            
+            for intake in intakes:
+                if intake.dish:
+                    multiplier = float(intake.portion_size)
+                    
+                    if intake.dish.calories:
+                        total_calories += float(intake.dish.calories) * multiplier
+                    if intake.dish.protein_g:
+                        total_protein += float(intake.dish.protein_g) * multiplier
+                    if intake.dish.carbs_g:
+                        total_carbs += float(intake.dish.carbs_g) * multiplier
+                    if intake.dish.fats_g:
+                        total_fat += float(intake.dish.fats_g) * multiplier
+                    if intake.dish.fiber_g:
+                        total_fiber += float(intake.dish.fiber_g) * multiplier
+                
+                if intake.water_ml:
+                    total_water += float(intake.water_ml)
+            
+            summary = {
+                "date": target_date.isoformat(),
+                "total_calories": round(total_calories, 2),
+                "total_protein_g": round(total_protein, 2),
+                "total_carbs_g": round(total_carbs, 2),
+                "total_fat_g": round(total_fat, 2),
+                "total_fiber_g": round(total_fiber, 2),
+                "total_water_ml": round(total_water, 2),
+                "intake_count": len(intakes)
+            }
+            
+            intake_logger.success(f"Daily summary calculated", "SUMMARY",
+                                calories=summary["total_calories"], 
+                                intake_count=summary["intake_count"])
+            
+            return summary
+            
+        except Exception as e:
+            intake_logger.error(f"Failed to calculate daily summary: {str(e)}", "SUMMARY",
+                              user_id=user_id, date=target_date, error=str(e))
+            raise
+
+# Legacy function for backward compatibility
+def log_intake(db: Session, user_id: int, dish_id: int, quantity: float) -> dict:
+    """Legacy function for logging intake - maintained for backward compatibility"""
+    intake_logger.info(f"Legacy log_intake called", "LEGACY",
+                     user_id=user_id, dish_id=dish_id, quantity=quantity)
+    
+    try:
+        # Convert to new format
+        intake_data = IntakeCreate(
+            dish_id=dish_id,
+            portion_size=quantity,
+            intake_time=datetime.now(),
+            water_ml=None
+        )
+        
+        result = IntakeService.create_intake(db, intake_data, user_id)
+        
+        intake_logger.success(f"Legacy intake logged successfully", "LEGACY",
+                            intake_id=result.id)
+        
+        return {
+            "success": True,
+            "intake_id": result.id,
+            "message": f"Successfully logged {quantity} serving(s)"
+        }
+        
+    except Exception as e:
+        intake_logger.error(f"Legacy intake logging failed: {str(e)}", "LEGACY",
+                          user_id=user_id, dish_id=dish_id, error=str(e))
+        return {
+            "success": False,
+            "error": str(e)
+        } 
