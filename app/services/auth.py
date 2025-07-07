@@ -51,14 +51,34 @@ class AuthService:
     @classmethod
     def generate_unique_username(cls, db: Session, base_username: str) -> str:
         """Generate a unique username by checking for collisions and appending numbers if needed."""
-        username = base_username
-        counter = 1
+        # First, get all existing usernames that start with the base_username in one query
+        # This reduces database calls from potentially 100+ to just 1-2
+        existing_usernames = db.query(User.username).filter(
+            User.username.like(f"{base_username}%")
+        ).all()
         
-        # Check for username collisions and resolve them
-        while db.query(User).filter(User.username == username).first():
+        # Convert to a set for O(1) lookup performance
+        existing_username_set = {username[0] for username in existing_usernames}
+        
+        # Start with the base username
+        username = base_username
+        if username not in existing_username_set:
+            return username
+            
+        # Find the first available username with a number suffix
+        counter = 1
+        max_attempts = 100  # Safety limit
+        
+        while counter <= max_attempts:
             username = f"{base_username}{counter}"
+            if username not in existing_username_set:
+                return username
             counter += 1
             
+        # If we've exhausted attempts, add a random suffix (very unlikely scenario)
+        random_suffix = cls.generate_random_string(8)
+        username = f"{base_username}_{random_suffix}"
+        
         return username
 
     @classmethod
