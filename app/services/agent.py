@@ -156,10 +156,18 @@ If you created a dish selection widget, explain that you found multiple matching
         if dish.image_urls and len(dish.image_urls) > 0:
             image_url = dish.image_urls[0]
         
-        # Truncate description
+        # Truncate description to 2-3 lines (approximately 120 characters)
         description = dish.description
-        if description and len(description) > 100:
-            description = description[:97] + "..."
+        if description and len(description) > 120:
+            description = description[:117] + "..."
+        
+        # Convert calories to integer if available
+        calories = None
+        if dish.calories:
+            try:
+                calories = int(float(dish.calories))
+            except (ValueError, TypeError):
+                calories = None
         
         return DishCard(
             id=dish.id,
@@ -167,10 +175,7 @@ If you created a dish selection widget, explain that you found multiple matching
             description=description,
             cuisine=dish.cuisine,
             image_url=image_url,
-            calories=dish.calories,
-            protein_g=dish.protein_g,
-            carbs_g=dish.carbs_g,
-            fats_g=dish.fats_g,
+            calories=calories,
             servings=dish.servings
         )
     

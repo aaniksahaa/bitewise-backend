@@ -70,10 +70,9 @@ class DishCard(BaseModel):
     description: Optional[str] = Field(default=None, description="Dish description (truncated)")
     cuisine: Optional[str] = Field(default=None, description="Cuisine type")
     image_url: Optional[str] = Field(default=None, description="Primary image URL")
-    calories: Optional[Decimal] = Field(default=None, description="Calories per serving")
-    protein_g: Optional[Decimal] = Field(default=None, description="Protein in grams")
-    carbs_g: Optional[Decimal] = Field(default=None, description="Carbohydrates in grams")
-    fats_g: Optional[Decimal] = Field(default=None, description="Fats in grams")
+    # Removed detailed nutritional fields to simplify selection and avoid serialization issues
+    # Only keep basic calorie info for display if needed
+    calories: Optional[int] = Field(default=None, description="Calories per serving (rounded)")
     servings: Optional[int] = Field(default=None, description="Number of servings")
 
 

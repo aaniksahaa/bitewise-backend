@@ -696,6 +696,54 @@ async def confirm_dish_selection(
                 detail="No conversation found"
             )
         
+        # Find the original message with the widget that needs to be updated
+        # Query messages directly since there's no relationship defined
+        from app.models.message import Message
+        conversation_messages = db.query(Message).filter(
+            Message.conversation_id == conversation.id
+        ).order_by(Message.created_at.desc()).all()
+        
+        original_message = None
+        for message in conversation_messages:
+            if (message.attachments and 
+                isinstance(message.attachments, dict) and 
+                "widgets" in message.attachments):
+                
+                for widget in message.attachments["widgets"]:
+                    if widget.get("widget_id") == request.widget_id:
+                        original_message = message
+                        break
+                if original_message:
+                    break
+        
+        # Update the widget status to "resolved" in the original message
+        if original_message:
+            api_logger.debug("Updating original widget status to resolved", "CONFIRM",
+                           message_id=original_message.id, widget_id=request.widget_id)
+            
+            # Parse the current attachments
+            current_attachments = original_message.attachments
+            if current_attachments and "widgets" in current_attachments:
+                # Update the specific widget
+                for widget in current_attachments["widgets"]:
+                    if widget.get("widget_id") == request.widget_id:
+                        widget["status"] = "resolved"
+                        widget["selected_dish_id"] = request.dish_id
+                        widget["selected_portion"] = request.portion_size
+                        widget["resolved_at"] = datetime.now().isoformat()
+                        api_logger.success("Widget status updated to resolved", "CONFIRM",
+                                         widget_id=request.widget_id, selected_dish_id=request.dish_id)
+                        break
+                
+                # Update the message with the new attachments
+                from app.services.chat import convert_decimals_to_floats
+                updated_attachments = convert_decimals_to_floats(current_attachments)
+                
+                original_message.attachments = updated_attachments
+                db.commit()
+                api_logger.success("Original message updated with resolved widget", "CONFIRM",
+                                 message_id=original_message.id)
+        
         # Create user confirmation message
         user_message_content = f"I confirm eating {request.portion_size}x {dish.name}"
         
