@@ -54,4 +54,53 @@ def test_generate_response_with_attachments(monkeypatch):
         assert "image" in response.lower()
         assert attachments is None or isinstance(attachments, dict)
 
+# ===== NEGATIVE TESTS =====
+# These tests verify that the system properly handles error conditions
+
+def test_generate_response_with_none_message():
+    """
+    Negative Test: Response generation should handle empty message.
+    
+    This test ensures that empty user messages
+    return appropriate default behavior.
+    """
+    # Patch LLM to return a simple response
+    with patch.object(AgentService, "llm", create=True) as mock_llm:
+        mock_llm_instance = MagicMock()
+        mock_llm_instance.invoke.return_value = DummyLLMResponse('{"use_tool": false, "response": "Please provide a message."}')
+        mock_llm.return_value = mock_llm_instance
+        
+        # Act: Generate response with empty message
+        response, input_tokens, output_tokens, attachments = AgentService.generate_response(
+            user_message=""  # Empty string instead of None
+        )
+        
+        # Assert: Should handle empty message gracefully
+        assert isinstance(response, str)
+        assert isinstance(input_tokens, int)
+        assert isinstance(output_tokens, int)
+
+def test_generate_response_with_very_long_message():
+    """
+    Negative Test: Response generation should handle very long messages.
+    
+    This test ensures that extremely long user messages
+    are processed appropriately.
+    """
+    # Patch LLM to return a response
+    with patch.object(AgentService, "llm", create=True) as mock_llm:
+        mock_llm_instance = MagicMock()
+        mock_llm_instance.invoke.return_value = DummyLLMResponse('{"use_tool": false, "response": "Message too long."}')
+        mock_llm.return_value = mock_llm_instance
+        
+        # Act: Generate response with very long message
+        very_long_message = "What is protein? " * 1000  # Very long message
+        response, input_tokens, output_tokens, attachments = AgentService.generate_response(
+            user_message=very_long_message
+        )
+        
+        # Assert: Should handle long message without crashing
+        assert isinstance(response, str)
+        assert len(response) > 0
+
 # You may add more granular unit tests for tool invocation, error handling, etc.
