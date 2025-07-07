@@ -13,15 +13,28 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Deploy to Azure VM
+    # - name: Deploy to Azure VM
+    #   uses: appleboy/ssh-action@v0.1.7
+    #   with:
+    #     host: ${{ secrets.HOST }}
+    #     username: ${{ secrets.USERNAME }}
+    #     key: ${{ secrets.SSH_KEY }}
+    #     script: |
+    #       # Make sure deploy script is executable
+    #       chmod +x /home/azureuser/bitewise-backend/deploy-docker.sh
+          
+    #       # Run deployment
+    #       /home/azureuser/bitewise-backend/deploy-docker.sh
+    
+    - name: Deploy to Anik Azure VM
       uses: appleboy/ssh-action@v0.1.7
       with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.SSH_KEY }}
+        host: ${{ secrets.ANIK_HOST }}
+        username: ${{ secrets.ANIK_USERNAME }}
+        key: ${{ secrets.ANIK_SSH_KEY }}
         script: |
           # Make sure deploy script is executable
-          chmod +x /home/azureuser/bitewise-backend/deploy-docker.sh
+          chmod +x /home/seed/bitewise/deploy.sh
           
           # Run deployment
-          /home/azureuser/bitewise-backend/deploy-docker.sh
+          /home/seed/bitewise/deploy.sh
