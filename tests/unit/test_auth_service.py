@@ -215,8 +215,8 @@ class TestAuthServiceCore:
         # Test user not found
         mock_db.query.return_value.filter.return_value.first.return_value = None
         result = AuthService.get_user_by_email(mock_db, "nonexistent@example.com")
-        assert result is None
-        
+        assert result is None 
+
 
     def test_get_current_user_with_valid_token(self):
         """
