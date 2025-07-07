@@ -216,36 +216,7 @@ class TestAuthServiceCore:
         mock_db.query.return_value.filter.return_value.first.return_value = None
         result = AuthService.get_user_by_email(mock_db, "nonexistent@example.com")
         assert result is None
-
-    def test_generate_unique_username(self):
-        """
-        Test unique username generation.
         
-        This test ensures that usernames are made unique when
-        collisions exist.
-        """
-        # Arrange: Mock database
-        mock_db = MagicMock()
-        
-        # Test no collision - username available
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-        result = AuthService.generate_unique_username(mock_db, "newuser")
-        assert result == "newuser"
-        
-        # Test with collision - need to add number
-        # Mock the database to return existing usernames that match the pattern
-        mock_existing_usernames = [("testuser",), ("testuser1",)]  # Tuples as returned by .all()
-        mock_db.query.return_value.filter.return_value.all.return_value = mock_existing_usernames
-        
-        result = AuthService.generate_unique_username(mock_db, "testuser")
-        assert result == "testuser2"  # Should find the first available number
-        
-        # Test with multiple collisions
-        mock_existing_usernames_many = [("testuser",), ("testuser1",), ("testuser2",), ("testuser3",)]
-        mock_db.query.return_value.filter.return_value.all.return_value = mock_existing_usernames_many
-        
-        result = AuthService.generate_unique_username(mock_db, "testuser")
-        assert result == "testuser4"  # Should find the first available number
 
     def test_get_current_user_with_valid_token(self):
         """

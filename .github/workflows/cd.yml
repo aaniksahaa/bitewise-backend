@@ -35,7 +35,7 @@ jobs:
         key: ${{ secrets.ANIK_SSH_KEY }}
         script: |
           # Make sure deploy script is executable
-          chmod +x /home/seed/bitewise/deploy.sh
+          chmod +x /home/seed/bitewise/deploy-optimized.sh
           
           # Run deployment
-          /home/seed/bitewise/deploy.sh
+          /home/seed/bitewise/deploy-optimized.sh
