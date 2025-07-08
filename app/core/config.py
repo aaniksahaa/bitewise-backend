@@ -52,7 +52,17 @@ class Settings(BaseSettings):
     YOUTUBE_V3_API_KEY: str = os.getenv("YOUTUBE_V3_API_KEY", "")
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "http://localhost:8080", "https://bitewise-delta.vercel.app", "https://bitewise.twiggle.tech"]
+    # CORS_ORIGINS: List[str] = ["http://localhost", "http://localhost:3000", "http://localhost:8080", "https://bitewise-delta.vercel.app", "https://bitewise.twiggle.tech"]
+
+    CORS_ORIGINS: List[str] = [
+        "http://localhost", 
+        "http://localhost:3000", 
+        "http://localhost:8080", 
+        "https://bitewise-delta.vercel.app", 
+        "https://bitewise.twiggle.tech",
+        "http://4.240.113.91:3000",  # VM frontend
+        "http://4.240.113.91:8080"   # VM dev frontend
+    ]
     
     # Database
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
