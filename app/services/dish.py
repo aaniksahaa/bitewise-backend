@@ -180,7 +180,8 @@ class DishService:
                 cuisine=dish.cuisine,
                 calories=dish.calories,
                 protein_g=dish.protein_g,
-                created_at=dish.created_at
+                created_at=dish.created_at,
+                image_urls=dish.image_urls
             )
             for dish in dishes
         ]
