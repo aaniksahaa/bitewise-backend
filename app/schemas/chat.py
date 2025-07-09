@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
+from decimal import Decimal
 
 
 class MessageType(str, Enum):
@@ -28,6 +29,20 @@ class ConversationStatus(str, Enum):
     DELETED = "deleted"
 
 
+class WidgetType(str, Enum):
+    """Widget types supported by the chat system."""
+    DISH_SELECTION = "dish_selection"
+    CONFIRMATION = "confirmation"
+    INFO_CARD = "info_card"
+
+
+class WidgetStatus(str, Enum):
+    """Widget status options."""
+    PENDING = "pending"
+    RESOLVED = "resolved"
+    EXPIRED = "expired"
+
+
 # Image and File Attachment Schemas
 class ImageAttachment(BaseModel):
     """Schema for image attachments."""
@@ -48,12 +63,62 @@ class FileAttachment(BaseModel):
     storage_path: str = Field(..., description="Path in storage")
 
 
+class DishCard(BaseModel):
+    """Simplified dish representation for widgets and UI cards."""
+    id: int = Field(..., description="Dish ID")
+    name: str = Field(..., description="Dish name")
+    description: Optional[str] = Field(default=None, description="Dish description (truncated)")
+    cuisine: Optional[str] = Field(default=None, description="Cuisine type")
+    image_url: Optional[str] = Field(default=None, description="Primary image URL")
+    # Removed detailed nutritional fields to simplify selection and avoid serialization issues
+    # Only keep basic calorie info for display if needed
+    calories: Optional[int] = Field(default=None, description="Calories per serving (rounded)")
+    servings: Optional[int] = Field(default=None, description="Number of servings")
+
+
+class DishSelectionWidget(BaseModel):
+    """Widget for dish selection during intake logging."""
+    widget_id: str = Field(..., description="Unique widget identifier")
+    widget_type: WidgetType = Field(default=WidgetType.DISH_SELECTION, description="Widget type")
+    status: WidgetStatus = Field(default=WidgetStatus.PENDING, description="Widget status")
+    title: str = Field(..., description="Widget title")
+    description: str = Field(..., description="Widget description")
+    search_term: str = Field(..., description="Original search term used")
+    extracted_portion: Optional[Decimal] = Field(default=None, description="Extracted portion size from user message")
+    dishes: List[DishCard] = Field(..., description="Available dish options")
+    selected_dish_id: Optional[int] = Field(default=None, description="Selected dish ID (when resolved)")
+    selected_portion: Optional[Decimal] = Field(default=None, description="Selected portion size (when resolved)")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional widget metadata")
+    created_at: Optional[str] = Field(default=None, description="Widget creation timestamp")
+    resolved_at: Optional[str] = Field(default=None, description="Widget resolution timestamp")
+
+
+class ControlMessage(BaseModel):
+    """Schema for control messages that trigger specific actions."""
+    action: str = Field(..., description="Action type (e.g., 'confirm_dish_selection')")
+    widget_id: str = Field(..., description="Target widget ID")
+    data: Dict[str, Any] = Field(..., description="Action-specific data")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "action": "confirm_dish_selection",
+                "widget_id": "dish_sel_123456",
+                "data": {
+                    "dish_id": 42,
+                    "portion_size": 1.5
+                }
+            }
+        }
+
+
 class MessageAttachments(BaseModel):
     """Schema for message attachments."""
     images: List[ImageAttachment] = Field(default_factory=list, description="Image attachments")
     files: List[FileAttachment] = Field(default_factory=list, description="File attachments")
-    widgets: Optional[Dict[str, Any]] = Field(default=None, description="Interactive widgets")
+    widgets: Optional[List[DishSelectionWidget]] = Field(default=None, description="Interactive widgets")
     tool_results: Optional[Dict[str, Any]] = Field(default=None, description="Results from tool calls")
+    control_message: Optional[ControlMessage] = Field(default=None, description="Control message for triggering actions")
 
 
 # Conversation Schemas

@@ -20,4 +20,5 @@ class User(Base):
     oauth_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login_at = Column(DateTime, nullable=True)  # Track last successful login
     profile = relationship("UserProfile", uselist=False, back_populates="user") 

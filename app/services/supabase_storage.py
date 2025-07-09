@@ -161,10 +161,19 @@ class SupabaseStorageService:
                 }
             )
             
-            if response.status_code != 200:
+            # The Supabase Python client's upload method returns different response types
+            # We'll check for common error patterns instead of status_code
+            if hasattr(response, 'error') and response.error:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to upload file: {response.json()}"
+                    detail=f"Failed to upload file: {response.error}"
+                )
+            
+            # Check if response indicates an error (different response patterns)
+            if isinstance(response, dict) and 'error' in response:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to upload file: {response['error']}"
                 )
             
             # Get public URL
@@ -207,7 +216,14 @@ class SupabaseStorageService:
         try:
             supabase = cls.get_client()
             response = supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([storage_path])
-            return response.status_code == 200
+            
+            # Check for errors instead of status_code
+            if hasattr(response, 'error') and response.error:
+                return False
+            if isinstance(response, dict) and 'error' in response:
+                return False
+            
+            return True
         except Exception:
             return False
     
@@ -230,23 +246,29 @@ class SupabaseStorageService:
                 path="/".join(storage_path.split("/")[:-1])  # Get parent directory
             )
             
-            if response.status_code == 200:
-                files = response.json()
-                filename = storage_path.split("/")[-1]
-                
-                for file_info in files:
-                    if file_info.get("name") == filename:
-                        public_url = supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
-                        
-                        return {
-                            "name": file_info.get("name"),
-                            "size": file_info.get("metadata", {}).get("size"),
-                            "content_type": file_info.get("metadata", {}).get("mimetype"),
-                            "created": file_info.get("created_at"),
-                            "updated": file_info.get("updated_at"),
-                            "public_url": public_url,
-                            "storage_path": storage_path
-                        }
+            # Check for errors instead of status_code
+            if hasattr(response, 'error') and response.error:
+                return None
+            if isinstance(response, dict) and 'error' in response:
+                return None
+            
+            # Handle different response formats
+            files = response if isinstance(response, list) else (response.get('data', []) if isinstance(response, dict) else [])
+            filename = storage_path.split("/")[-1]
+            
+            for file_info in files:
+                if file_info.get("name") == filename:
+                    public_url = supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
+                    
+                    return {
+                        "name": file_info.get("name"),
+                        "size": file_info.get("metadata", {}).get("size"),
+                        "content_type": file_info.get("metadata", {}).get("mimetype"),
+                        "created": file_info.get("created_at"),
+                        "updated": file_info.get("updated_at"),
+                        "public_url": public_url,
+                        "storage_path": storage_path
+                    }
             
             return None
         except Exception:
@@ -265,7 +287,12 @@ class SupabaseStorageService:
             
             # Try to list files in the bucket (this will fail if bucket doesn't exist)
             try:
-                supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).list()
+                response = supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).list()
+                # Check for errors
+                if hasattr(response, 'error') and response.error:
+                    raise Exception("Bucket doesn't exist")
+                if isinstance(response, dict) and 'error' in response:
+                    raise Exception("Bucket doesn't exist")
                 return True  # Bucket exists
             except Exception:
                 # Bucket doesn't exist, try to create it
@@ -277,6 +304,13 @@ class SupabaseStorageService:
                         "allowed_mime_types": settings.ALLOWED_IMAGE_TYPES
                     }
                 )
-                return response.status_code in [200, 201]
+                
+                # Check for errors in bucket creation
+                if hasattr(response, 'error') and response.error:
+                    return False
+                if isinstance(response, dict) and 'error' in response:
+                    return False
+                
+                return True
         except Exception:
             return False 

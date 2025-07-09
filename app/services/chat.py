@@ -1,31 +1,44 @@
-from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, func
-from fastapi import HTTPException, status
-import math
+import os
 import json
+import math
+from typing import Optional, List, Dict, Any, Union
+from datetime import datetime, timezone
+from decimal import Decimal
+from sqlalchemy.orm import Session
+from sqlalchemy import desc, func, and_
+from fastapi import HTTPException, status
 
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.llm_model import LLMModel
+from app.models.user import User
 from app.schemas.chat import (
-    ConversationCreate,
-    ConversationUpdate,
-    ConversationResponse,
-    ConversationListItem,
-    ConversationListResponse,
-    MessageCreate,
-    MessageUpdate,
-    MessageResponse,
-    MessageListResponse,
-    ChatRequest,
-    ChatResponse,
-    ConversationSummaryResponse,
-    MessageType,
-    MessageStatus,
-    ConversationStatus
+    ConversationCreate, ConversationUpdate, ConversationResponse, ConversationListResponse,
+    MessageCreate, MessageUpdate, MessageResponse, MessageListResponse,
+    ConversationSummaryResponse, ConversationStatus, ConversationListItem, MessageStatus
 )
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles Decimal objects."""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+
+def convert_decimals_to_floats(obj: Any) -> Any:
+    """Recursively convert Decimal objects to floats in nested data structures."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals_to_floats(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals_to_floats(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_decimals_to_floats(item) for item in obj)
+    else:
+        return obj
 
 
 class ChatService:
@@ -222,14 +235,18 @@ class ChatService:
             )
         
         # Create message
+        # Convert any Decimal objects in attachments to floats for JSON serialization
+        clean_attachments = convert_decimals_to_floats(message_data.attachments) if message_data.attachments else None
+        clean_extra_data = convert_decimals_to_floats(message_data.extra_data) if message_data.extra_data else None
+        
         db_message = Message(
             conversation_id=conversation_id,
             user_id=current_user_id,
             content=message_data.content,
             is_user_message=is_user_message,
             message_type=message_data.message_type,
-            attachments=message_data.attachments,
-            extra_data=message_data.extra_data,
+            attachments=clean_attachments,
+            extra_data=clean_extra_data,
             parent_message_id=message_data.parent_message_id,
             llm_model_id=llm_model_id,
             input_tokens=input_tokens,
