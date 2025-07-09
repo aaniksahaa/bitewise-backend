@@ -53,7 +53,8 @@ def tables(engine):
                 oauth_provider VARCHAR,
                 oauth_id VARCHAR,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_login_at DATETIME
             )
         """))
         

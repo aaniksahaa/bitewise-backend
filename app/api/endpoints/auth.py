@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -26,6 +26,7 @@ from app.schemas.auth import (
     UserRegister,
     UserRegisterResponse,
     GoogleLoginUrlResponse,
+    DirectLoginResponse,
 )
 from app.services.auth import AuthService, get_current_active_user
 
@@ -110,11 +111,12 @@ async def verify_email(verification_data: EmailVerify, db: Session = Depends(get
     )
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login", response_model=Union[LoginResponse, DirectLoginResponse])
 async def login(login_data: UserLogin, db: Session = Depends(get_db)) -> Any:
     """
     Authenticate a user with email and password.
-    An OTP will be sent to the user's email for two-factor authentication.
+    If the user hasn't logged in for more than 7 days, an OTP will be sent for verification.
+    Otherwise, return access tokens directly.
     """
     user = AuthService.get_user_by_email(db, login_data.email)
     if not user or not AuthService.verify_password(
@@ -131,21 +133,45 @@ async def login(login_data: UserLogin, db: Session = Depends(get_db)) -> Any:
             detail="Account not active",
         )
 
-    # Create and send OTP
-    otp, expires_at = AuthService.create_otp(
-        db, user.id, user.email, "login", expires_in=300
-    )
-    
-    # Send login OTP via email
-    from app.services.email import EmailService
-    email_service = EmailService()
-    email_service.send_login_otp(user.email, otp, user.username)
+    # Refresh user from database to get the most recent last_login_at value
+    db.refresh(user)
 
-    return LoginResponse(
-        message="OTP sent to your email for verification",
-        login_request_id=str(user.id),  # Using user ID as login request ID for simplicity
-        expires_in=300,  # 5 minutes
-    )
+    # Check if OTP is required based on last login time
+    otp_required = AuthService.is_otp_required_for_login(user)
+    
+    if not otp_required:
+        # User has logged in recently (within 7 days), provide tokens directly
+        access_token = AuthService.create_access_token(user.id)
+        refresh_token = AuthService.create_refresh_token(db, user.id)
+        
+        # Update last login time
+        AuthService.update_last_login(db, user.id)
+        
+        return DirectLoginResponse(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            refresh_token=refresh_token,
+            user_id=str(user.id),
+            message="Login successful - welcome back!",
+            otp_required=False,
+        )
+    else:
+        # User hasn't logged in for more than 7 days, require OTP verification
+        otp, expires_at = AuthService.create_otp(
+            db, user.id, user.email, "login", expires_in=300
+        )
+        
+        # Send login OTP via email
+        from app.services.email import EmailService
+        email_service = EmailService()
+        email_service.send_login_otp(user.email, otp, user.username)
+
+        return LoginResponse(
+            message="For security, please verify with the OTP sent to your email",
+            login_request_id=str(user.id),
+            expires_in=300,  # 5 minutes
+        )
 
 
 @router.post("/verify-login", response_model=LoginVerifyResponse)
@@ -174,6 +200,9 @@ async def verify_login(verification_data: LoginVerify, db: Session = Depends(get
     # Generate tokens
     access_token = AuthService.create_access_token(user.id)
     refresh_token = AuthService.create_refresh_token(db, user.id)
+    
+    # Update last login time after successful OTP verification
+    AuthService.update_last_login(db, user.id)
 
     return LoginVerifyResponse(
         access_token=access_token,
@@ -298,9 +327,6 @@ async def google_callback_get(
         )
 
 
-
-
-
 async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResponse:
     """
     Process Google user data and create/update user in database.
@@ -370,6 +396,9 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
         user.is_verified = True
         db.commit()
 
+    # Update last login time for Google OAuth users
+    AuthService.update_last_login(db, user.id)
+
     # Check if profile is complete (has required fields)
     profile_complete = bool(
         user.full_name and 
@@ -394,8 +423,6 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
         profile_complete=profile_complete,
         is_new_user=is_new_user,
     )
-
-
 
 
 @router.post("/refresh", response_model=Token)
@@ -526,4 +553,33 @@ async def login_for_access_token(
         access_token=access_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    ) 
+    )
+
+
+@router.get("/debug/login-status")
+async def debug_login_status(
+    email: str,
+    db: Session = Depends(get_db)
+) -> Any:
+    """
+    Debug endpoint to check user's login status and OTP requirements.
+    This is for debugging purposes only.
+    """
+    user = AuthService.get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    otp_required = AuthService.is_otp_required_for_login(user)
+    
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "last_login_at": user.last_login_at,
+        "otp_required": otp_required,
+        "threshold_days": settings.LOGIN_OTP_THRESHOLD_DAYS,
+        "current_time": datetime.utcnow(),
+        "time_since_last_login": (datetime.utcnow() - user.last_login_at) if user.last_login_at else None,
+    } 

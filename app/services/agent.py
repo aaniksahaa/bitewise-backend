@@ -1,5 +1,7 @@
 import os
 import json
+import re
+import uuid
 import requests
 from typing import Optional, Dict, Any, Tuple, List
 from sqlalchemy.orm import Session
@@ -8,13 +10,25 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.tools import tool, BaseTool
 from langchain_core.messages import HumanMessage
+from datetime import datetime
+from decimal import Decimal
 import base64
 
 from app.models.llm_model import LLMModel
 from app.services.dish import DishService
 from app.services.intake import IntakeService
 from app.schemas.intake import IntakeCreateByName
+from app.schemas.chat import DishCard, DishSelectionWidget, WidgetType, WidgetStatus
 from app.core.config import settings
+from app.utils.logger import agent_logger
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles Decimal objects."""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
 
 
 class AgentService:
@@ -27,10 +41,13 @@ class AgentService:
         self.tool_dict = {}
         self.parser = JsonOutputParser()
         
-        # Updated prompt template to include image context
+        agent_logger.info("AgentService initialized", "INIT", 
+                         model="gpt-4o-mini", vision_enabled=True)
+        
+        # Clear and focused prompt template for current workflow
         self.prompt_template = ChatPromptTemplate.from_template("""
 You are BiteWise, a helpful AI assistant for nutrition and health tracking. 
-You can help users with general questions and have access to tools for searching dishes, logging food intake, and finding YouTube videos.
+You help users with general questions and have access to specialized tools for dish searching and YouTube videos.
 
 User message: {message}
 {image_context}
@@ -51,11 +68,21 @@ If no tool is needed, respond with:
   "response": "Final natural language response"
 }}
 
+FOOD INTAKE WORKFLOW:
+When users mention eating or consuming food (e.g., "I ate 2 pizzas", "I had chicken breast", "I consumed some pasta"), follow this workflow:
+
+1. Use the `search_dishes_for_intake` tool to find matching dishes
+2. This creates an interactive dish selection widget that shows the user multiple options
+3. The user will then select their preferred dish and confirm the portion size
+4. The actual intake logging happens after user confirmation (you don't handle this step)
+
+TOOL USAGE GUIDELINES:
+- `search_dishes_for_intake`: When users mention eating/consuming food for intake tracking
+- `search_dishes`: When users ask about finding dishes, recipes, or nutritional information (not for intake)
+- `search_youtube_videos`: When users ask for cooking tutorials, recipe videos, workout instructions, or educational content
+
 Be conversational, friendly, and focus on helping users with their health and nutrition goals.
-Use tools when appropriate based on the user's message and any attached images:
-- If images show food items, consider using the search_dishes tool to find nutritional information or log_intake tool if the user mentions eating something.
-- If users ask for cooking tutorials, recipe videos, workout instructions, or any educational content that would benefit from video demonstrations, use the search_youtube_videos tool.
-- Use YouTube search for beginners asking how to cook specific dishes, exercise routines, or educational nutrition content.
+If images show food items, consider using search tools to help identify or provide information about the foods.
 """)
 
         # Template for final response generation
@@ -69,7 +96,88 @@ You used a tool and got this result: {tool_result}
 Please provide a friendly, conversational response to the user based on the tool result.
 Be helpful and explain what happened. Do not use JSON format - just respond naturally.
 Reference the images if they were relevant to the tool usage.
+
+If you created a dish selection widget, explain that you found multiple matching dishes and ask the user to select which one they actually consumed from the options provided.
 """)
+    
+    @staticmethod
+    def extract_portion_from_message(message: str) -> Optional[Decimal]:
+        """Extract portion information from user message using regex patterns."""
+        # Common portion patterns
+        patterns = [
+            r'(\d+(?:\.\d+)?)\s*(?:pieces?|slices?|portions?|servings?)',
+            r'(\d+(?:\.\d+)?)\s*(?:cups?|bowls?)',
+            r'(\d+(?:\.\d+)?)\s*(?:small|medium|large)',
+            r'(\d+(?:\.\d+)?)\s*x\s*',  # "2x pizza"
+            r'(\d+(?:\.\d+)?)\s+(?:\w+)',  # "2 pizza", "1.5 chicken"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                try:
+                    return Decimal(match.group(1))
+                except:
+                    continue
+        
+        return None
+    
+    @staticmethod
+    def extract_food_terms_from_message(message: str) -> List[str]:
+        """Extract potential food terms from user message."""
+        # Common intake keywords that suggest food consumption
+        intake_keywords = ['ate', 'consumed', 'had', 'eating', 'finished', 'took']
+        
+        # Check if message contains intake keywords
+        message_lower = message.lower()
+        if not any(keyword in message_lower for keyword in intake_keywords):
+            return []
+        
+        # Simple extraction - look for nouns after intake keywords
+        # This is a basic implementation - in production you'd use NLP libraries
+        words = message.split()
+        food_terms = []
+        
+        for i, word in enumerate(words):
+            if word.lower() in intake_keywords and i + 1 < len(words):
+                # Look for the next few words as potential food terms
+                for j in range(i + 1, min(i + 4, len(words))):
+                    next_word = words[j].lower().strip('.,!?')
+                    if len(next_word) > 2 and next_word not in ['the', 'a', 'an', 'some', 'my']:
+                        food_terms.append(next_word)
+        
+        return food_terms
+    
+    @staticmethod
+    def create_dish_card(dish) -> DishCard:
+        """Convert a dish object to a DishCard for widgets."""
+        # Get first image URL if available
+        image_url = None
+        if dish.image_urls and len(dish.image_urls) > 0:
+            image_url = dish.image_urls[0]
+        
+        # Truncate description to 2-3 lines (approximately 120 characters)
+        description = dish.description
+        if description and len(description) > 120:
+            description = description[:117] + "..."
+        
+        # Convert calories to integer if available
+        calories = None
+        if dish.calories:
+            try:
+                calories = int(float(dish.calories))
+            except (ValueError, TypeError):
+                calories = None
+        
+        return DishCard(
+            id=dish.id,
+            name=dish.name,
+            description=description,
+            cuisine=dish.cuisine,
+            image_url=image_url,
+            calories=calories,
+            servings=dish.servings
+        )
     
     def _analyze_image(self, image_data: str, content_type: str = "image/jpeg") -> str:
         """
@@ -82,6 +190,9 @@ Reference the images if they were relevant to the tool usage.
         Returns:
             Compact description of the image (under 30 words)
         """
+        agent_logger.debug("Analyzing image with vision model", "VISION", 
+                          content_type=content_type, data_size=len(image_data))
+        
         try:
             # Create a specialized prompt for food image analysis
             analysis_prompt = """
@@ -112,11 +223,15 @@ Reference the images if they were relevant to the tool usage.
             if len(words) > 30:
                 description = " ".join(words[:30]) + "..."
             
+            agent_logger.success("Image analyzed successfully", "VISION", 
+                               description=description, word_count=len(words))
             return description
             
         except Exception as e:
             # Fallback description
-            return f"Image uploaded (analysis unavailable: {str(e)[:50]})"
+            error_msg = f"analysis unavailable: {str(e)[:50]}"
+            agent_logger.error("Image analysis failed", "VISION", error=error_msg)
+            return f"Image uploaded ({error_msg})"
     
     def _process_image_attachments(self, attachments: Optional[Dict[str, Any]]) -> str:
         """
@@ -129,9 +244,12 @@ Reference the images if they were relevant to the tool usage.
             Formatted string with image descriptions
         """
         if not attachments or "images" not in attachments or not attachments["images"]:
+            agent_logger.debug("No image attachments to process", "IMAGES")
             return ""
         
         images = attachments["images"]
+        agent_logger.info(f"Processing {len(images)} image attachment(s)", "IMAGES")
+        
         image_descriptions = []
         
         for i, img in enumerate(images, 1):
@@ -143,6 +261,7 @@ Reference the images if they were relevant to the tool usage.
                 if base64_data:
                     description = self._analyze_image(base64_data, content_type)
                     image_descriptions.append(f"Image {i}: {description}")
+                    agent_logger.debug(f"Processed image {i}", "IMAGES", description=description)
                 else:
                     # Fallback: try URL if no base64 data (for backward compatibility)
                     image_url = img.get("url", "")
@@ -155,26 +274,40 @@ Reference the images if they were relevant to the tool usage.
                                 base64_encoded = base64.b64encode(response.content).decode('utf-8')
                                 description = self._analyze_image(base64_encoded, content_type)
                                 image_descriptions.append(f"Image {i}: {description}")
+                                agent_logger.debug(f"Fetched and processed image {i} from URL", "IMAGES")
                             else:
                                 image_descriptions.append(f"Image {i}: Image file (could not fetch)")
+                                agent_logger.warning(f"Failed to fetch image {i} from URL", "IMAGES", 
+                                                   status_code=response.status_code)
                         except Exception as e:
                             image_descriptions.append(f"Image {i}: Image file (fetch failed)")
+                            agent_logger.error(f"Error fetching image {i}", "IMAGES", error=str(e))
                     else:
                         image_descriptions.append(f"Image {i}: Image file (no data available)")
+                        agent_logger.warning(f"Image {i} has no data or URL", "IMAGES")
             except Exception as e:
                 image_descriptions.append(f"Image {i}: Image file (analysis failed)")
+                agent_logger.error(f"Failed to process image {i}", "IMAGES", error=str(e))
         
         if image_descriptions:
-            return f"\nAttached images:\n" + "\n".join(image_descriptions) + "\n"
+            result = f"\nAttached images:\n" + "\n".join(image_descriptions) + "\n"
+            agent_logger.success("Image attachments processed", "IMAGES", 
+                               total_processed=len(image_descriptions))
+            return result
         
         return ""
     
     def _create_tools_with_context(self, db: Optional[Session], current_user_id: Optional[int]) -> List[BaseTool]:
         """Create tools with proper context access."""
         
+        agent_logger.debug("Creating tools with context", "TOOLS", 
+                          has_db=bool(db), has_user_id=bool(current_user_id))
+        
         @tool
         def search_dishes(search_term: str) -> Dict[str, Any]:
-            """Search for dishes by name or keywords. Use this when the user asks about finding dishes, recipes, or specific foods. Parameter: search_term (string)"""
+            """Search for dishes by name or keywords. Use this when the user asks about finding dishes, recipes, or specific foods (but NOT when they mention eating something). Parameter: search_term (string)"""
+            agent_logger.info(f"🔍 Searching dishes for: '{search_term}'", "SEARCH")
+            
             if db:
                 try:
                     result = DishService.search_dishes_by_name(
@@ -195,6 +328,15 @@ Reference the images if they were relevant to the tool usage.
                             "protein_g": float(dish.protein_g) if dish.protein_g else None
                         })
                     
+                    agent_logger.success(f"Found {len(dishes)} dishes", "SEARCH", 
+                                       search_term=search_term, total_found=result.total_count)
+                    
+                    if dishes:
+                        dish_names = [dish["name"] for dish in dishes[:3]]
+                        agent_logger.info(f"Top results: {', '.join(dish_names)}" + 
+                                        (f" (and {len(dishes)-3} more)" if len(dishes) > 3 else ""), 
+                                        "SEARCH")
+                    
                     return {
                         "success": True,
                         "dishes": dishes,
@@ -202,6 +344,7 @@ Reference the images if they were relevant to the tool usage.
                         "search_term": search_term
                     }
                 except Exception as e:
+                    agent_logger.error(f"Dish search failed: {str(e)}", "SEARCH", search_term=search_term)
                     return {
                         "success": False,
                         "error": str(e),
@@ -209,6 +352,7 @@ Reference the images if they were relevant to the tool usage.
                         "dishes": []
                     }
             else:
+                agent_logger.error("Database not available for dish search", "SEARCH")
                 return {
                     "success": False,
                     "error": "Database not available",
@@ -217,49 +361,80 @@ Reference the images if they were relevant to the tool usage.
                 }
 
         @tool  
-        def log_intake(dish_name: str, portion_size: float = 1.0) -> Dict[str, Any]:
-            """Log a food intake for the user. Use this when the user mentions eating something or wants to track their food consumption. Parameters: dish_name (string), portion_size (float, default 1.0)"""
-            if db and current_user_id:
+        def search_dishes_for_intake(search_term: str, user_message: str) -> Dict[str, Any]:
+            """Search for dishes and create a dish selection widget for intake logging. Use this when users mention eating/consuming food. Parameters: search_term (string), user_message (string - the original user message for portion extraction)"""
+            agent_logger.info(f"🍽️ Creating dish selection widget for: '{search_term}'", "WIDGET")
+            
+            if db:
                 try:
-                    from datetime import datetime
-                    
-                    intake_data = IntakeCreateByName(
-                        dish_name=dish_name,
-                        portion_size=portion_size,
-                        intake_time=datetime.now(),
-                        water_ml=None
-                    )
-                    
-                    result = IntakeService.create_intake_by_name(
+                    # Search for dishes
+                    result = DishService.search_dishes_by_name(
                         db=db,
-                        intake_data=intake_data,
-                        current_user_id=current_user_id
+                        search_term=search_term,
+                        page=1,
+                        page_size=5  # Get top 5 for selection
                     )
+                    
+                    if not result.dishes:
+                        agent_logger.warning("No dishes found for intake widget", "WIDGET", search_term=search_term)
+                        return {
+                            "success": False,
+                            "error": f"No dishes found matching '{search_term}'",
+                            "search_term": search_term
+                        }
+                    
+                    # Extract portion from user message
+                    extracted_portion = AgentService.extract_portion_from_message(user_message)
+                    
+                    # Convert dishes to dish cards (take top 3)
+                    dish_cards = []
+                    for dish in result.dishes[:3]:
+                        dish_card = AgentService.create_dish_card(dish)
+                        dish_cards.append(dish_card)
+                    
+                    # Create dish selection widget
+                    widget_id = f"dish_sel_{uuid.uuid4().hex[:8]}"
+                    widget = DishSelectionWidget(
+                        widget_id=widget_id,
+                        title="Which dish did you consume?",
+                        description=f"I found several dishes matching '{search_term}'. Please select the one you actually ate:",
+                        search_term=search_term,
+                        extracted_portion=extracted_portion,
+                        dishes=dish_cards,
+                        created_at=datetime.now().isoformat()
+                    )
+                    
+                    agent_logger.success(f"Created dish selection widget with {len(dish_cards)} options", "WIDGET",
+                                       widget_id=widget_id, dish_count=len(dish_cards))
                     
                     return {
                         "success": True,
-                        "intake_id": result.id,
-                        "dish_name": result.dish.name,
-                        "portion_size": float(result.portion_size),
-                        "calories": float(result.dish.calories) if result.dish.calories else None,
-                        "logged_at": result.intake_time.isoformat()
+                        "widget": widget.model_dump(),
+                        "search_term": search_term,
+                        "dishes_found": len(result.dishes)
                     }
+                    
                 except Exception as e:
+                    agent_logger.error(f"Failed to create dish selection widget: {str(e)}", "WIDGET", 
+                                     search_term=search_term, error=str(e))
                     return {
                         "success": False,
                         "error": str(e),
-                        "dish_name": dish_name
+                        "search_term": search_term
                     }
             else:
+                agent_logger.error("Database not available for dish selection widget", "WIDGET")
                 return {
                     "success": False,
-                    "error": "Database or user context not available",
-                    "dish_name": dish_name
+                    "error": "Database not available",
+                    "search_term": search_term
                 }
         
         @tool
         def search_youtube_videos(query: str, max_results: int = 5) -> Dict[str, Any]:
             """Search for YouTube videos by query. Use this when the user asks for cooking tutorials, recipe videos, workout videos, or any educational content that would benefit from video demonstrations. Parameters: query (string), max_results (int, default 5)"""
+            agent_logger.info(f"🎥 Searching YouTube for: '{query}'", "YOUTUBE", max_results=max_results)
+            
             try:
                 url = "https://youtube-v311.p.rapidapi.com/search/"
                 
@@ -278,6 +453,8 @@ Reference the images if they were relevant to the tool usage.
                     "x-rapidapi-key": settings.YOUTUBE_V3_API_KEY,
                     "x-rapidapi-host": "youtube-v311.p.rapidapi.com"
                 }
+                
+                agent_logger.debug("Making YouTube API request", "YOUTUBE")
                 
                 response = requests.get(url, headers=headers, params=querystring, timeout=10)
                 
@@ -309,6 +486,9 @@ Reference the images if they were relevant to the tool usage.
                     next_page_token = data.get("nextPageToken", "")
                     region_code = data.get("regionCode", "")
                     
+                    agent_logger.success(f"Found {len(videos)} YouTube videos", "YOUTUBE", 
+                                       query=query, total_results=total_results)
+                    
                     return {
                         "success": True,
                         "videos": videos,
@@ -320,6 +500,8 @@ Reference the images if they were relevant to the tool usage.
                         "region_code": region_code
                     }
                 else:
+                    agent_logger.error(f"YouTube API error", "YOUTUBE", 
+                                     status_code=response.status_code, query=query)
                     return {
                         "success": False,
                         "error": f"YouTube API returned status code {response.status_code}",
@@ -328,6 +510,7 @@ Reference the images if they were relevant to the tool usage.
                     }
                     
             except requests.exceptions.Timeout:
+                agent_logger.error("YouTube API request timed out", "YOUTUBE", query=query)
                 return {
                     "success": False,
                     "error": "Request to YouTube API timed out",
@@ -335,6 +518,7 @@ Reference the images if they were relevant to the tool usage.
                     "videos": []
                 }
             except Exception as e:
+                agent_logger.error(f"YouTube search failed: {str(e)}", "YOUTUBE", query=query)
                 return {
                     "success": False,
                     "error": str(e),
@@ -342,7 +526,11 @@ Reference the images if they were relevant to the tool usage.
                     "videos": []
                 }
         
-        return [search_dishes, log_intake, search_youtube_videos]
+        tools = [search_dishes, search_dishes_for_intake, search_youtube_videos]
+        agent_logger.success(f"Created {len(tools)} tools", "TOOLS", 
+                           tool_names=[t.name for t in tools])
+        
+        return tools
     
     def _get_tool_descriptions(self) -> str:
         """Get formatted tool descriptions."""
@@ -367,10 +555,23 @@ Reference the images if they were relevant to the tool usage.
         Returns:
             Tuple of (response_content, tool_attachments)
         """
+        # Start agent processing
+        agent_logger.section_start("Agent Processing", "AGENT")
+        
+        # Log the incoming request
+        truncated_message = user_message[:100] + "..." if len(user_message) > 100 else user_message
+        agent_logger.info(f"📩 Processing message: '{truncated_message}'", "INPUT",
+                         user_id=current_user_id, has_attachments=bool(attachments))
+        
         # Process image attachments to get descriptions
-        image_context = self._process_image_attachments(attachments)
+        if attachments:
+            agent_logger.separator("┈", 30, "VISION")
+            image_context = self._process_image_attachments(attachments)
+        else:
+            image_context = ""
         
         # Create tools with proper context
+        agent_logger.separator("┈", 30, "SETUP")
         self.tools = self._create_tools_with_context(db, current_user_id)
         self.tool_dict = {t.name: t for t in self.tools}
         tool_descriptions = self._get_tool_descriptions()
@@ -383,16 +584,25 @@ Reference the images if they were relevant to the tool usage.
         }
         
         # Generate prompt and get LLM response
+        agent_logger.separator("┈", 30, "LLM")
+        agent_logger.debug("Generating prompt and calling LLM", "LLM")
         prompt = self.prompt_template.format(**input_data)
         response = self.llm.invoke(prompt)
         
+        agent_logger.debug("Received LLM response", "LLM", 
+                          response_length=len(response.content))
+        
         try:
             parsed = self.parser.invoke(response.content)
+            agent_logger.debug("Parsed LLM response successfully", "LLM",
+                             use_tool=parsed.get("use_tool", False))
         except Exception as e:
             # Fallback if JSON parsing fails
+            agent_logger.warning(f"Failed to parse LLM response as JSON: {str(e)}", "LLM")
             fallback_response = f"I'm here to help with your nutrition and health questions! You asked: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'"
             if image_context:
                 fallback_response = f"I can see you've shared some images with me. {fallback_response}"
+            agent_logger.section_end("Agent Processing", "AGENT", success=False)
             return fallback_response, None
         
         # Check if tool use is requested
@@ -400,30 +610,48 @@ Reference the images if they were relevant to the tool usage.
             response_text = parsed.get("response", "I'm here to help with your nutrition and health questions!")
             if image_context and "I can see" not in response_text and "image" not in response_text.lower():
                 response_text = f"I can see the images you've shared. {response_text}"
+            
+            agent_logger.success("Responding without tool use", "LLM")
+            agent_logger.section_end("Agent Processing", "AGENT", success=True)
             return response_text, None
         
         # Execute tool
         tool_name = parsed.get("tool_name", "")
         tool_input = parsed.get("tool_input", {})
         
+        agent_logger.separator("┈", 30, "TOOL")
+        agent_logger.info(f"🔧 Executing tool: {tool_name}", "TOOL",
+                         tool_input=tool_input)
+        
         if tool_name not in self.tool_dict:
+            agent_logger.error(f"Unknown tool requested: {tool_name}", "TOOL",
+                             available_tools=list(self.tool_dict.keys()))
             error_response = f"I wanted to help you with that, but I encountered an issue with the tool '{tool_name}'. How can I assist you with your nutrition questions?"
             if image_context:
                 error_response = f"I can see the images you've shared. {error_response}"
+            agent_logger.section_end("Agent Processing", "AGENT", success=False)
             return error_response, None
         
         # Execute the tool
         tool = self.tool_dict[tool_name]
         try:
+            agent_logger.debug(f"Invoking tool: {tool_name}", "TOOL")
+            
             # Handle both old dict format and new direct parameter format
             if isinstance(tool_input, dict):
                 tool_output = tool.invoke(tool_input)
             else:
                 tool_output = tool.invoke({"input": tool_input})
+                
+            tool_success = tool_output.get("success", True)
+            agent_logger.success(f"Tool execution completed: {tool_name}", "TOOL",
+                               success=tool_success)
         except Exception as e:
+            agent_logger.error(f"Tool execution failed: {tool_name}", "TOOL", error=str(e))
             tool_output = {"success": False, "error": str(e)}
+            tool_success = False
         
-        # Prepare tool attachments
+        # Prepare tool attachments - handle widgets specially
         tool_attachments = {
             "tool_calls": [{
                 "tool_name": tool_name,
@@ -431,11 +659,27 @@ Reference the images if they were relevant to the tool usage.
             }]
         }
         
+        # If this is a dish selection widget, add it to attachments
+        if tool_name == "search_dishes_for_intake" and tool_output.get("success") and "widget" in tool_output:
+            widget_data = tool_output["widget"]
+            # Parse the widget back into DishSelectionWidget object for proper formatting
+            widget = DishSelectionWidget(**widget_data)
+            tool_attachments["widgets"] = [widget.model_dump()]
+            agent_logger.success(f"🎯 Widget added to attachments", "WIDGET",
+                               widget_id=widget.widget_id, dishes_count=len(widget.dishes))
+        
+        agent_logger.debug(f"Tool attachments prepared", "TOOL", 
+                         has_widgets="widgets" in tool_attachments,
+                         attachment_keys=list(tool_attachments.keys()))
+        
         # Generate final response using the natural language template
+        agent_logger.separator("┈", 30, "RESPONSE")
+        agent_logger.debug("Generating final response", "RESPONSE")
+        
         final_input = {
             "original_message": user_message,
             "image_context": image_context,
-            "tool_result": json.dumps(tool_output, indent=2)
+            "tool_result": json.dumps(tool_output, indent=2, cls=DecimalEncoder)
         }
         
         final_prompt = self.final_response_template.format(**final_input)
@@ -450,8 +694,10 @@ Reference the images if they were relevant to the tool usage.
                 if tool_name == "search_dishes":
                     dishes_count = len(tool_output.get("dishes", []))
                     final_content = f"I found {dishes_count} dishes matching your search for '{tool_output.get('search_term', 'your query')}'!"
-                elif tool_name == "log_intake":
-                    final_content = f"Great! I've logged your {tool_output.get('dish_name', 'food intake')} successfully."
+                elif tool_name == "search_dishes_for_intake":
+                    dish_count = tool_output.get("dishes_found", 0)
+                    search_term = tool_output.get("search_term", "your query")
+                    final_content = f"I found {dish_count} dishes matching '{search_term}'. Please select which one you actually consumed from the options below so I can log your intake accurately!"
                 elif tool_name == "search_youtube_videos":
                     videos_count = len(tool_output.get("videos", []))
                     final_content = f"I found {videos_count} YouTube videos for '{tool_output.get('query', 'your search')}'! These videos should be helpful for your request."
@@ -465,6 +711,11 @@ Reference the images if they were relevant to the tool usage.
                 final_content = f"I tried to help you with that, but encountered an issue: {tool_output.get('error', 'Unknown error')}. How else can I assist you?"
                 if image_context:
                     final_content = f"I can see the images you've shared. {final_content}"
+        
+        agent_logger.success("Agent response completed", "RESPONSE", 
+                           final_length=len(final_content), tool_used=tool_name, tool_success=tool_success)
+        
+        agent_logger.section_end("Agent Processing", "AGENT", success=tool_success)
         
         return final_content, tool_attachments
     
@@ -494,7 +745,7 @@ Reference the images if they were relevant to the tool usage.
             )
             
             # Estimate token usage (rough approximation)
-            input_tokens = len(user_message.split()) + 50  # Message + prompt overhead
+            input_tokens = len(user_message.split()) + 100  # Message + prompt overhead
             
             # Add tokens for image analysis if images are present
             if attachments and "images" in attachments and attachments["images"]:
@@ -502,7 +753,12 @@ Reference the images if they were relevant to the tool usage.
                 image_count = len(attachments["images"])
                 input_tokens += image_count * 150  # Conservative estimate for image processing
             
-            output_tokens = len(response_content.split()) + 10  # Response + overhead
+            output_tokens = len(response_content.split()) + 50  # Response + overhead
+            
+            # Log attachment details
+            agent_logger.debug("Final attachments preparation", "RESPONSE",
+                             has_tool_attachments=bool(tool_attachments),
+                             has_input_attachments=bool(attachments))
             
             # Merge tool attachments with image attachments
             final_attachments = tool_attachments or {}
@@ -512,10 +768,19 @@ Reference the images if they were relevant to the tool usage.
                 if "tool_results" in attachments:
                     final_attachments["tool_results"] = attachments.get("tool_results", {})
             
+            # Log final attachments
+            if final_attachments:
+                agent_logger.success("Final attachments prepared", "RESPONSE",
+                                   has_widgets="widgets" in final_attachments,
+                                   has_images="images" in final_attachments,
+                                   has_tool_calls="tool_calls" in final_attachments,
+                                   attachment_keys=list(final_attachments.keys()))
+            
             return response_content, input_tokens, output_tokens, final_attachments
             
         except Exception as e:
             # Fallback response
+            agent_logger.error(f"Agent generate_response failed: {str(e)}", "RESPONSE", error=str(e))
             error_response = f"I'm experiencing some technical difficulties, but I'm here to help with your nutrition and health questions. You asked: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'"
             
             # Still acknowledge images if they were uploaded

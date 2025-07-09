@@ -1,12 +1,13 @@
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import func, or_, and_
 from fastapi import HTTPException, status
 import math
 
 from app.models.dish import Dish
 from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListItem, DishListResponse
 from app.utils.search import SearchUtils
+from app.utils.logger import dish_logger
 
 
 class DishService:
@@ -144,26 +145,53 @@ class DishService:
 
     @staticmethod
     def search_dishes_by_name(
-        db: Session, 
-        search_term: str, 
-        page: int = 1, 
+        db: Session,
+        search_term: str,
+        page: int = 1,
         page_size: int = 20
     ) -> DishListResponse:
-        """Search dishes by name using intelligent fuzzy matching and scoring."""
-        # Use the new fuzzy search utility
-        scored_dishes, total_count = SearchUtils.search_dishes_with_scoring(
-            db=db,
-            search_term=search_term,
-            page=page,
-            page_size=page_size,
-            min_score_threshold=10.0  # Reasonable threshold for name search
-        )
+        """Search dishes by name with case-insensitive partial matching."""
+        
+        dish_logger.debug(f"🔍 Searching dishes: '{search_term}'", "SEARCH", 
+                         page=page, page_size=page_size)
+        
+        # Create search filter
+        search_filter = Dish.name.ilike(f"%{search_term}%")
+        
+        # Build query
+        query = db.query(Dish).filter(search_filter)
+        
+        # Get total count before pagination
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        dishes = query.offset(offset).limit(page_size).all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Convert to response format (ignoring scores in final response)
-        dish_items = [DishListItem.model_validate(dish) for dish, score in scored_dishes]
+        # Convert to list items
+        dish_items = [
+            DishListItem(
+                id=dish.id,
+                name=dish.name,
+                description=dish.description,
+                cuisine=dish.cuisine,
+                calories=dish.calories,
+                protein_g=dish.protein_g,
+                created_at=dish.created_at
+            )
+            for dish in dishes
+        ]
+        
+        dish_logger.success(f"Found {total_count} dishes", "SEARCH",
+                          search_term=search_term, returned_count=len(dishes), total_count=total_count)
+        
+        if dishes and len(dishes) <= 3:
+            # Log the names of found dishes for debugging
+            dish_names = [dish.name for dish in dishes]
+            dish_logger.debug(f"Results: {', '.join(dish_names)}", "SEARCH")
         
         return DishListResponse(
             dishes=dish_items,
