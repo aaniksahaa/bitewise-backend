@@ -116,6 +116,43 @@ async def get_my_dishes(
     )
 
 
+@router.get("/by-prep-time", response_model=DishListResponse)
+async def get_dishes_by_prep_time(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db)
+):
+    """Get dishes sorted by preparation time (ascending)."""
+    return DishService.get_dishes_by_prep_time(
+        db=db,
+        page=page,
+        page_size=page_size
+    )
+
+@router.get("/avg-prep-time", response_model=float)
+async def get_avg_prep_time(
+    search_term: str,
+    db: Session = Depends(get_db)
+):
+    """Get average preparation time for dishes matching search term."""
+    return DishService.get_avg_prep_time(
+        db=db,
+        search_term=search_term
+    )
+
+
+@router.get("/avg-ingredient-count", response_model=float)
+async def get_avg_ingredient_count(
+    search_term: str,
+    db: Session = Depends(get_db)
+):
+    """Get average count of ingredients per dish for dishes matching search term."""
+    return DishService.get_avg_ingredient_count(
+        db=db,
+        search_term=search_term
+    )
+
+
 @router.get("/{dish_id}", response_model=DishResponse)
 async def get_dish(
     dish_id: int,

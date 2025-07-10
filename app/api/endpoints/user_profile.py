@@ -38,6 +38,20 @@ async def get_my_profile(
     """Get the current user's profile."""
     return UserProfileService.get_profile(db=db, user_id=current_user.id)
 
+@router.get("/message-count", response_model=int)
+async def get_message_count(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+):
+    """Get the current user's message count."""
+    return UserProfileService.get_message_count(db=db, user_id=current_user.id)
+
+@router.get("/delete-messages", response_model=int)
+async def delete_messages(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+):
+    """Get the current user's message count."""
+    return UserProfileService.delete_messages(db=db, user_id=current_user.id)
+
 
 @router.put("/me", response_model=UserProfileResponse)
 async def update_my_profile(

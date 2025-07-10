@@ -52,6 +52,24 @@ class UserProfileService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
             )
         return profile
+    
+    @staticmethod
+    def get_message_count(db: Session, user_id: int) -> int:
+        """Get message count by user ID."""
+        from app.models.message import Message 
+
+        cnt = db.query(Message).filter(Message.user_id == user_id).count()
+
+        return cnt
+    
+    @staticmethod
+    def delete_messages(db: Session, user_id: int) -> int:
+        from app.models.message import Message 
+
+        cnt = db.query(Message).filter(Message.user_id == user_id).delete()
+        db.commit()
+
+        return cnt
 
     @staticmethod
     def update_profile(

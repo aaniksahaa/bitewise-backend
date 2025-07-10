@@ -280,4 +280,102 @@ class DishService:
             cuisine=cuisine,
             page=page,
             page_size=page_size
+        )
+
+    @staticmethod
+    def get_dishes_by_prep_time(
+        db: Session,
+        page: int = 1,
+        page_size: int = 20
+    ) -> DishListResponse:
+        """Get dishes sorted by preparation time (ascending)."""
+        # Build query to get dishes sorted by prep_time_minutes
+        query = db.query(Dish).filter(Dish.prep_time_minutes.isnot(None)).order_by(Dish.prep_time_minutes.asc())
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        dishes = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format
+        dish_items = [DishListItem.model_validate(dish) for dish in dishes]
+        
+        return DishListResponse(
+            dishes=dish_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
         ) 
+    
+    @staticmethod
+    def get_avg_prep_time(
+        db: Session,
+        search_term: str
+    ) -> float:
+        """Get avg prep time for dishes matching search term"""
+
+        search_filter = Dish.name.ilike(f"%{search_term}%")
+
+        # Build query to get dishes sorted by prep_time_minutes
+        query = db.query(func.avg(Dish.prep_time_minutes)).filter(search_filter)
+
+        avg_prep_time = query.scalar()
+
+        return avg_prep_time or 0.0
+
+    # @staticmethod
+    # def get_avg_ingredient_count(
+    #     db: Session,
+    #     search_term: str
+    # ) -> float:
+    #     """Get average count of ingredients per dish for dishes matching search term"""
+    #     from app.models.dish_ingredient import DishIngredient
+        
+    #     # First get the matching dishes and their ingredient counts
+    #     search_filter = Dish.name.ilike(f"%{search_term}%")
+        
+    #     # JOIN dishes with dish_ingredients and count ingredients per dish
+    #     subquery = (
+    #         db.query(
+    #             Dish.id,
+    #             func.count(DishIngredient.ingredient_id).label('ingredient_count')
+    #         )
+    #         .join(DishIngredient, Dish.id == DishIngredient.dish_id)
+    #         .filter(search_filter)
+    #         .group_by(Dish.id)
+    #         .subquery()
+    #     )
+        
+    #     # Calculate average of ingredient counts
+    #     avg_count = db.query(func.avg(subquery.c.ingredient_count)).scalar()
+        
+    #     return float(avg_count) if avg_count else 0.0
+
+    @staticmethod
+    def get_avg_ingredient_count(
+        db: Session,
+        search_term: str
+    ) -> float:
+        from app.models.dish_ingredient import DishIngredient
+
+        search_filter = Dish.name.ilike(f"%{search_term}%")
+        
+        subquery =(
+            db.query(
+                Dish.id, 
+                func.count(DishIngredient.ingredient_id).label('ingred_count')
+            ).join(DishIngredient, Dish.id == DishIngredient.dish_id)
+            .filter(search_filter)
+            .group_by(Dish.id)
+            .subquery()
+        )
+
+        avg_count = db.query(func.avg(subquery.c.ingred_count)).scalar()
+
+        return avg_count or 0.0
