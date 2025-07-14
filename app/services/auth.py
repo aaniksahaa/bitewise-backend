@@ -13,6 +13,9 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models.auth import OTP, PasswordResetRequest, RefreshToken
 from app.models.user import User
+from app.models.user_profile import UserProfile, GenderType, CookingSkillLevelType
+from datetime import date
+from decimal import Decimal
 from app.schemas.auth import TokenPayload
 from app.services.email import EmailService
 
@@ -382,6 +385,59 @@ class AuthService:
                 detail="Inactive user",
             )
         return current_user
+
+    @staticmethod
+    def get_user_by_username(db: Session, username: str) -> Optional[User]:
+        """Get user by username."""
+        return db.query(User).filter(User.username == username).first()
+
+    @staticmethod
+    def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+        """Get user by ID."""
+        return db.query(User).filter(User.id == user_id).first()
+
+    @staticmethod
+    def create_default_profile(db: Session, user_id: int, full_name: str = "") -> UserProfile:
+        """Create a default user profile with placeholder values."""
+        # Check if profile already exists
+        existing_profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        if existing_profile:
+            return existing_profile
+        
+        # Extract first and last name from full_name
+        name_parts = full_name.strip().split() if full_name else []
+        first_name = name_parts[0] if len(name_parts) > 0 else "User"
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+        
+        # Create default profile with placeholder values
+        default_profile = UserProfile(
+            user_id=user_id,
+            first_name=first_name,
+            last_name=last_name,
+            gender=GenderType.other,  # Default to 'other' as it's neutral
+            height_cm=Decimal("170.0"),  # Average height placeholder
+            weight_kg=Decimal("70.0"),   # Average weight placeholder
+            date_of_birth=date(2000, 1, 1),  # Default placeholder date
+            cooking_skill_level=CookingSkillLevelType.beginner,  # Default skill level
+            location_city="Unknown",  # Placeholder city
+            location_country="Unknown",  # Placeholder country
+            # Set array fields to empty arrays to prevent null errors
+            dietary_restrictions=[],
+            allergies=[],
+            medical_conditions=[],
+            fitness_goals=[],
+            taste_preferences=[],
+            cuisine_interests=[],
+            # Set notification preferences to True by default
+            email_notifications_enabled=True,
+            push_notifications_enabled=True
+        )
+        
+        db.add(default_profile)
+        db.commit()
+        db.refresh(default_profile)
+        
+        return default_profile
 
 
 # Standalone dependency functions for FastAPI
