@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi_sso.sso.google import GoogleSSO
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
@@ -133,6 +134,9 @@ async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)) -> An
             detail="Account not active",
         )
 
+    user_id = user.id
+    user_email = user.email
+    user_username = user.username
     # Refresh user from database to get the most recent last_login_at value
     await db.refresh(user)
 
@@ -141,35 +145,35 @@ async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)) -> An
     
     if not otp_required:
         # User has logged in recently (within 7 days), provide tokens directly
-        access_token = AuthService.create_access_token(user.id)
-        refresh_token = await AuthService.create_refresh_token(db, user.id)
+        access_token = AuthService.create_access_token(user_id)
+        refresh_token = await AuthService.create_refresh_token(db, user_id)
         
         # Update last login time
-        await AuthService.update_last_login(db, user.id)
+        await AuthService.update_last_login(db, user_id)
         
         return DirectLoginResponse(
             access_token=access_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             refresh_token=refresh_token,
-            user_id=str(user.id),
+            user_id=str(user_id),
             message="Login successful - welcome back!",
             otp_required=False,
         )
     else:
         # User hasn't logged in for more than 7 days, require OTP verification
         otp, expires_at = await AuthService.create_otp(
-            db, user.id, user.email, "login", expires_in=300
+            db, user_id, user_email, "login", expires_in=300
         )
         
         # Send login OTP via email
         from app.services.email import EmailService
         email_service = EmailService()
-        email_service.send_login_otp(user.email, otp, user.username)
+        email_service.send_login_otp(user_email, otp, user_username)
 
         return LoginResponse(
             message="For security, please verify with the OTP sent to your email",
-            login_request_id=str(user.id),
+            login_request_id=str(user_id),
             expires_in=300,  # 5 minutes
         )
 
@@ -180,7 +184,8 @@ async def verify_login(verification_data: LoginVerify, db: AsyncSession = Depend
     Verify the login OTP and return an access token upon successful verification.
     """
     user_id = verification_data.login_request_id
-    user = await db.query(User).filter(User.id == int(user_id)).first()
+    user_email = user.email
+    user = (await db.execute(select(User).where(User.id == int(user_id)))).scalars().first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -189,7 +194,7 @@ async def verify_login(verification_data: LoginVerify, db: AsyncSession = Depend
 
     # Verify OTP
     otp_verification = await AuthService.verify_otp(
-        db, user.email, verification_data.otp, "login"
+        db, user_email, verification_data.otp, "login"
     )
     if not otp_verification:
         raise HTTPException(
@@ -198,18 +203,18 @@ async def verify_login(verification_data: LoginVerify, db: AsyncSession = Depend
         )
 
     # Generate tokens
-    access_token = AuthService.create_access_token(user.id)
-    refresh_token = await AuthService.create_refresh_token(db, user.id)
+    access_token = AuthService.create_access_token(user_id)
+    refresh_token = await AuthService.create_refresh_token(db, user_id)
     
     # Update last login time after successful OTP verification
-    await AuthService.update_last_login(db, user.id)
+    await AuthService.update_last_login(db, user_id)
 
     return LoginVerifyResponse(
         access_token=access_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         refresh_token=refresh_token,
-        user_id=str(user.id),
+        user_id=str(user_id),
     )
 
 
