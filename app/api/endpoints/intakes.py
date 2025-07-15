@@ -87,6 +87,7 @@ async def get_today_intakes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
+    print("get_today_intakes")
     """Get all intakes from the last 24 hours for the current user."""
     return IntakeService.get_today_intakes(
         db=db,

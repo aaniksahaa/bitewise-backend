@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import datetime, date
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, cast, DateTime
 from fastapi import HTTPException, status
 import math
 from decimal import Decimal
@@ -246,6 +246,7 @@ class IntakeService:
         page_size: int = 20
     ) -> IntakeListResponse:
         """Get all intakes for the current user with pagination."""
+        intake_logger.info(f"Getting all intakes for user {current_user_id}", "GET", page=page, page_size=page_size)
         query = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.user_id == current_user_id)
         
         # Order by intake_time descending (most recent first)
@@ -296,17 +297,17 @@ class IntakeService:
         query = db.query(Intake).options(joinedload(Intake.dish)).filter(
             and_(
                 Intake.user_id == current_user_id,
-                Intake.intake_time >= start_time,
-                Intake.intake_time <= end_time
+                cast(Intake.intake_time, DateTime) >= start_time,
+                cast(Intake.intake_time, DateTime) <= end_time
             )
         )
-        
+        print(current_user_id)
         # Order by intake_time ascending for period queries
         query = query.order_by(Intake.intake_time.asc())
         
         # Get total count
         total_count = query.count()
-        
+        # print(total_count)
         # Apply pagination
         offset = (page - 1) * page_size
         intakes = query.offset(offset).limit(page_size).all()
@@ -391,15 +392,30 @@ class IntakeService:
         """Get all intakes from the last 24 hours for the current user."""
         from datetime import datetime, timezone, timedelta
         
-        # Get current time and 24 hours ago
-        now = datetime.now(timezone.utc)
-        twenty_four_hours_ago = now - timedelta(hours=24)
+        # Get current UTC time
+        now_utc = datetime.now(timezone.utc)
+        
+        # Define Dhaka's timezone offset
+        dhaka_offset = timedelta(hours=6)
+        dhaka_timezone = timezone(dhaka_offset) 
+        
+        # Convert current UTC time to Dhaka's local time
+        now_dhaka = now_utc.astimezone(dhaka_timezone)
+        
+        # Calculate 24 hours ago in Dhaka's local time
+        twenty_four_hours_ago_dhaka = now_dhaka - timedelta(hours=24)
+        
+        # Strip timezone information to get naive datetimes for comparison
+        start_time_naive = twenty_four_hours_ago_dhaka.replace(tzinfo=None)
+        end_time_naive = now_dhaka.replace(tzinfo=None)
+        
+        print(now_dhaka)
         
         return IntakeService.get_intakes_by_period(
             db=db,
             current_user_id=current_user_id,
-            start_time=twenty_four_hours_ago,
-            end_time=now,
+            start_time=start_time_naive,
+            end_time=end_time_naive,
             page=1,
             page_size=100  # Get all intakes from last 24 hours without pagination
         )
@@ -407,12 +423,12 @@ class IntakeService:
     @staticmethod
     def get_calendar_day_intakes(db: Session, current_user_id: int) -> IntakeListResponse:
         """Get all intakes for the current calendar day (00:00 to 23:59 today) for the current user."""
-        from datetime import date, time, datetime, timezone
+        from datetime import date, time, datetime
         
         # Get today's start and end
         today = date.today()
-        start_of_day = datetime.combine(today, time.min).replace(tzinfo=timezone.utc)
-        end_of_day = datetime.combine(today, time.max).replace(tzinfo=timezone.utc)
+        start_of_day = datetime.combine(today, time.min)
+        end_of_day = datetime.combine(today, time.max)
         
         return IntakeService.get_intakes_by_period(
             db=db,
@@ -430,14 +446,14 @@ class IntakeService:
         
         try:
             # Get all intakes for the specified date
-            start_datetime = datetime.combine(target_date, datetime.min.time())
-            end_datetime = datetime.combine(target_date, datetime.max.time())
+            start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=datetime.timezone.utc)
+            end_datetime = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=datetime.timezone.utc)
             
             intakes = db.query(Intake).filter(
                 and_(
                     Intake.user_id == user_id,
-                    Intake.intake_time >= start_datetime,
-                    Intake.intake_time <= end_datetime
+                    cast(Intake.intake_time, DateTime) >= start_datetime,
+                    cast(Intake.intake_time, DateTime) <= end_datetime
                 )
             ).all()
             
