@@ -430,7 +430,7 @@ class AuthService:
             )
             token_data = TokenPayload(**payload)
             
-            if datetime.fromtimestamp(token_data.exp) < datetime.now(timezone.utc):
+            if datetime.fromtimestamp(token_data.exp, tz=timezone.utc) < datetime.now(timezone.utc):
                 raise credentials_exception
                 
         except jwt.PyJWTError:
