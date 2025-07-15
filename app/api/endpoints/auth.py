@@ -66,6 +66,9 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)) -> An
     db.commit()
     db.refresh(user)
 
+    # Create default user profile with placeholder values
+    AuthService.create_default_profile(db, user.id, user_data.full_name)
+
     # Create and send OTP
     otp, _ = AuthService.create_otp(
         db, user.id, user.email, "register", expires_in=300
@@ -374,6 +377,9 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
             db.add(user)
             db.commit()
             db.refresh(user)
+
+            # Create default user profile with placeholder values
+            AuthService.create_default_profile(db, user.id, user.full_name)
 
             # Send welcome email for new users
             try:
