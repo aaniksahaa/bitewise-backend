@@ -16,6 +16,7 @@ from app.models.message import Message
 from app.models.post import Post
 from app.models.user import User
 from app.models.user_profile import UserProfile
+from app.models.test import Test 
 
 __all__ = [
     "User",
@@ -36,4 +37,5 @@ __all__ = [
     "Comment",
     "LLMModel",
     "FitnessPlan",
+    "Test"
 ]

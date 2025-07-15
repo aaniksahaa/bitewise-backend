@@ -17,6 +17,7 @@ from app.api.endpoints import (
     intakes,
     stats,
     user_profile,
+    tests
 )
 
 # from app.api.endpoints import users, items, etc.
@@ -34,6 +35,7 @@ api_router.include_router(fitness.router, prefix="/fitness", tags=["fitness"])
 api_router.include_router(intakes.router, prefix="/intakes", tags=["intakes"])
 api_router.include_router(stats.router, prefix="/stats", tags=["stats"])
 api_router.include_router(health_history.router, prefix="/health", tags=["health"])
+api_router.include_router(tests.router, prefix="/tests", tags=["test"])
 # api_router.include_router(users.router, prefix="/users", tags=["users"])
 # api_router.include_router(items.router, prefix="/items", tags=["items"])
 # Add additional routers as needed
