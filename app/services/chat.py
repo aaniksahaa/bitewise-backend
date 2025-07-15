@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timezone
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, and_
+from sqlalchemy import desc, func, and_, or_
 from fastapi import HTTPException, status
 
 from app.models.conversation import Conversation
@@ -371,6 +371,160 @@ class ChatService:
         db.commit()
         
         return True
+
+    @staticmethod
+    def get_message_by_id(
+        db: Session,
+        message_id: int,
+        current_user_id: int
+    ) -> Optional[MessageResponse]:
+        """Get a specific message by ID (only for the current user)."""
+        message = db.query(Message).filter(
+            and_(
+                Message.id == message_id,
+                Message.user_id == current_user_id,
+                Message.status != MessageStatus.DELETED
+            )
+        ).first()
+        
+        if not message:
+            return None
+        
+        return MessageResponse.model_validate(message)
+
+    @staticmethod
+    def get_all_user_messages(
+        db: Session,
+        current_user_id: int,
+        page: int = 1,
+        page_size: int = 50
+    ) -> MessageListResponse:
+        """Get all messages for the current user across all conversations with pagination."""
+        query = db.query(Message).filter(
+            and_(
+                Message.user_id == current_user_id,
+                Message.status != MessageStatus.DELETED
+            )
+        )
+        
+        # Order by created_at descending (most recent first)
+        query = query.order_by(Message.created_at.desc())
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        messages = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format
+        message_items = [MessageResponse.model_validate(message) for message in messages]
+        
+        return MessageListResponse(
+            messages=message_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
+
+    @staticmethod
+    def filter_all_user_messages(
+        db: Session,
+        current_user_id: int,
+        filters: Dict[str, Any],
+        page: int = 1,
+        page_size: int = 50
+    ) -> MessageListResponse:
+        """Filter all messages for the current user across all conversations."""
+        query = db.query(Message).filter(
+            and_(
+                Message.user_id == current_user_id,
+                Message.status != MessageStatus.DELETED
+            )
+        )
+        
+        # Apply filters
+        if "search" in filters and filters["search"]:
+            search_term = f"%{filters['search']}%"
+            query = query.filter(Message.content.ilike(search_term))
+        
+        if "conversation_id" in filters and filters["conversation_id"]:
+            query = query.filter(Message.conversation_id == filters["conversation_id"])
+        
+        if "is_user_message" in filters and filters["is_user_message"] is not None:
+            query = query.filter(Message.is_user_message == filters["is_user_message"])
+        
+        if "message_type" in filters and filters["message_type"]:
+            query = query.filter(Message.message_type == filters["message_type"])
+        
+        if "status" in filters and filters["status"]:
+            query = query.filter(Message.status == filters["status"])
+        
+        if "has_attachments" in filters and filters["has_attachments"] is not None:
+            if filters["has_attachments"]:
+                query = query.filter(Message.attachments.isnot(None))
+            else:
+                query = query.filter(Message.attachments.is_(None))
+        
+        # Token filters
+        if "min_tokens" in filters and filters["min_tokens"] is not None:
+            query = query.filter(
+                or_(
+                    and_(Message.input_tokens.isnot(None), Message.input_tokens >= filters["min_tokens"]),
+                    and_(Message.output_tokens.isnot(None), Message.output_tokens >= filters["min_tokens"])
+                )
+            )
+        
+        if "max_tokens" in filters and filters["max_tokens"] is not None:
+            query = query.filter(
+                or_(
+                    and_(Message.input_tokens.isnot(None), Message.input_tokens <= filters["max_tokens"]),
+                    and_(Message.output_tokens.isnot(None), Message.output_tokens <= filters["max_tokens"])
+                )
+            )
+        
+        # Date filters
+        if "min_created_at" in filters and filters["min_created_at"]:
+            try:
+                min_created = datetime.fromisoformat(filters["min_created_at"].replace('Z', '+00:00'))
+                query = query.filter(Message.created_at >= min_created)
+            except ValueError:
+                pass
+        
+        if "max_created_at" in filters and filters["max_created_at"]:
+            try:
+                max_created = datetime.fromisoformat(filters["max_created_at"].replace('Z', '+00:00'))
+                query = query.filter(Message.created_at <= max_created)
+            except ValueError:
+                pass
+        
+        # Order by created_at descending (most recent first)
+        query = query.order_by(Message.created_at.desc())
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        messages = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format
+        message_items = [MessageResponse.model_validate(message) for message in messages]
+        
+        return MessageListResponse(
+            messages=message_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
 
     @staticmethod
     def mark_messages_as_read(

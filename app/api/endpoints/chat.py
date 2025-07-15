@@ -144,6 +144,71 @@ async def delete_conversation(
         )
 
 # Message Management Endpoints
+@router.get("/messages", response_model=MessageListResponse)
+async def get_all_messages(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all messages for the current user across all conversations with pagination."""
+    return ChatService.get_all_user_messages(
+        db=db,
+        current_user_id=current_user.id,
+        page=page,
+        page_size=page_size
+    )
+
+@router.get("/messages/filter", response_model=MessageListResponse)
+async def filter_all_messages(
+    # Search filters
+    search: Optional[str] = Query(None, description="Search in message content"),
+    conversation_id: Optional[int] = Query(None, description="Filter by conversation ID"),
+    is_user_message: Optional[bool] = Query(None, description="Filter by message type (true=user, false=AI)"),
+    message_type: Optional[str] = Query(None, description="Filter by message type"),
+    status: Optional[str] = Query(None, description="Filter by message status"),
+    has_attachments: Optional[bool] = Query(None, description="Filter by attachment presence"),
+    
+    # Token filters
+    min_tokens: Optional[int] = Query(None, ge=0, description="Minimum token count"),
+    max_tokens: Optional[int] = Query(None, ge=0, description="Maximum token count"),
+    
+    # Date filters
+    min_created_at: Optional[str] = Query(None, description="Created after date (ISO format)"),
+    max_created_at: Optional[str] = Query(None, description="Created before date (ISO format)"),
+    
+    # Pagination
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Filter all messages for the current user across all conversations."""
+    filters = {
+        "search": search,
+        "conversation_id": conversation_id,
+        "is_user_message": is_user_message,
+        "message_type": message_type,
+        "status": status,
+        "has_attachments": has_attachments,
+        "min_tokens": min_tokens,
+        "max_tokens": max_tokens,
+        "min_created_at": min_created_at,
+        "max_created_at": max_created_at,
+    }
+    
+    # Remove None values
+    filters = {k: v for k, v in filters.items() if v is not None}
+    
+    return ChatService.filter_all_user_messages(
+        db=db,
+        current_user_id=current_user.id,
+        filters=filters,
+        page=page,
+        page_size=page_size
+    )
+
 @router.get("/conversations/{conversation_id}/messages", response_model=MessageListResponse)
 async def get_conversation_messages(
     conversation_id: int,
@@ -160,6 +225,25 @@ async def get_conversation_messages(
         page=page,
         page_size=page_size
     )
+
+@router.get("/messages/{message_id}", response_model=MessageResponse)
+async def get_message(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get a specific message by ID."""
+    message = ChatService.get_message_by_id(
+        db=db,
+        message_id=message_id,
+        current_user_id=current_user.id
+    )
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found"
+        )
+    return message
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def create_message(
