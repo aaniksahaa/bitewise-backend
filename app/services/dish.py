@@ -215,12 +215,12 @@ class DishService:
         if not dish:
             return None
             
-        # Check if user owns this dish or is admin (for now just check ownership)
-        if dish.created_by_user_id != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this dish"
-            )
+        # # Check if user owns this dish or is admin (for now just check ownership)
+        # if dish.created_by_user_id != current_user_id:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_403_FORBIDDEN,
+        #         detail="Not authorized to update this dish"
+        #     )
         
         # Update only provided fields
         update_data = dish_update.model_dump(exclude_unset=True)
@@ -240,12 +240,12 @@ class DishService:
         if not dish:
             return False
             
-        # Check if user owns this dish
-        if dish.created_by_user_id != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to delete this dish"
-            )
+        # # Check if user owns this dish
+        # if dish.created_by_user_id != current_user_id:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_403_FORBIDDEN,
+        #         detail="Not authorized to delete this dish"
+        #     )
         
         db.delete(dish)
         db.commit()
@@ -379,3 +379,149 @@ class DishService:
         avg_count = db.query(func.avg(subquery.c.ingred_count)).scalar()
 
         return avg_count or 0.0
+
+    @staticmethod
+    def get_filtered_dishes(
+        db: Session,
+        search: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        has_image: Optional[bool] = None,
+        min_prep_time: Optional[int] = None,
+        max_prep_time: Optional[int] = None,
+        min_cook_time: Optional[int] = None,
+        max_cook_time: Optional[int] = None,
+        min_servings: Optional[int] = None,
+        max_servings: Optional[int] = None,
+        min_calories: Optional[float] = None,
+        max_calories: Optional[float] = None,
+        min_protein: Optional[float] = None,
+        max_protein: Optional[float] = None,
+        min_carbs: Optional[float] = None,
+        max_carbs: Optional[float] = None,
+        min_fats: Optional[float] = None,
+        max_fats: Optional[float] = None,
+        min_sugar: Optional[float] = None,
+        max_sugar: Optional[float] = None,
+        created_by_user_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> DishListResponse:
+        """Get dishes with comprehensive filtering support."""
+        
+        dish_logger.debug(f"🔍 Filtering dishes with comprehensive criteria", "FILTER",
+                         search=search, cuisine=cuisine, has_image=has_image,
+                         min_prep_time=min_prep_time, max_prep_time=max_prep_time,
+                         min_cook_time=min_cook_time, max_cook_time=max_cook_time,
+                         min_servings=min_servings, max_servings=max_servings,
+                         min_calories=min_calories, max_calories=max_calories,
+                         min_protein=min_protein, max_protein=max_protein,
+                         min_carbs=min_carbs, max_carbs=max_carbs,
+                         min_fats=min_fats, max_fats=max_fats,
+                         min_sugar=min_sugar, max_sugar=max_sugar,
+                         page=page, page_size=page_size)
+        
+        query = db.query(Dish)
+        
+        # Text search (case insensitive in name, description, or cuisine)
+        if search and search.strip():
+            search_term = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    Dish.name.ilike(search_term),
+                    Dish.description.ilike(search_term),
+                    Dish.cuisine.ilike(search_term)
+                )
+            )
+        
+        # Cuisine filter
+        if cuisine:
+            query = query.filter(Dish.cuisine.ilike(f"%{cuisine}%"))
+        
+        # Image availability filter
+        if has_image is not None:
+            if has_image:
+                query = query.filter(
+                    and_(
+                        Dish.image_urls.isnot(None),
+                        func.array_length(Dish.image_urls, 1) > 0
+                    )
+                )
+            else:
+                query = query.filter(
+                    or_(
+                        Dish.image_urls.is_(None),
+                        func.array_length(Dish.image_urls, 1) == 0
+                    )
+                )
+        
+        # Prep time filters
+        if min_prep_time is not None:
+            query = query.filter(Dish.prep_time_minutes >= min_prep_time)
+        if max_prep_time is not None:
+            query = query.filter(Dish.prep_time_minutes <= max_prep_time)
+        
+        # Cook time filters
+        if min_cook_time is not None:
+            query = query.filter(Dish.cook_time_minutes >= min_cook_time)
+        if max_cook_time is not None:
+            query = query.filter(Dish.cook_time_minutes <= max_cook_time)
+        
+        # Servings filters
+        if min_servings is not None:
+            query = query.filter(Dish.servings >= min_servings)
+        if max_servings is not None:
+            query = query.filter(Dish.servings <= max_servings)
+        
+        # Nutritional filters
+        if min_calories is not None:
+            query = query.filter(Dish.calories >= min_calories)
+        if max_calories is not None:
+            query = query.filter(Dish.calories <= max_calories)
+        
+        if min_protein is not None:
+            query = query.filter(Dish.protein_g >= min_protein)
+        if max_protein is not None:
+            query = query.filter(Dish.protein_g <= max_protein)
+        
+        if min_carbs is not None:
+            query = query.filter(Dish.carbs_g >= min_carbs)
+        if max_carbs is not None:
+            query = query.filter(Dish.carbs_g <= max_carbs)
+        
+        if min_fats is not None:
+            query = query.filter(Dish.fats_g >= min_fats)
+        if max_fats is not None:
+            query = query.filter(Dish.fats_g <= max_fats)
+        
+        if min_sugar is not None:
+            query = query.filter(Dish.sugar_g >= min_sugar)
+        if max_sugar is not None:
+            query = query.filter(Dish.sugar_g <= max_sugar)
+        
+        # Creator filter
+        if created_by_user_id:
+            query = query.filter(Dish.created_by_user_id == created_by_user_id)
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        dishes = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format
+        dish_items = [DishListItem.model_validate(dish) for dish in dishes]
+        
+        dish_logger.success(f"Found {total_count} dishes with filters", "FILTER",
+                          returned_count=len(dishes), total_count=total_count)
+        
+        return DishListResponse(
+            dishes=dish_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )

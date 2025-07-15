@@ -106,6 +106,75 @@ async def get_calendar_day_intakes(
     )
 
 
+@router.get("/filter", response_model=IntakeListResponse)
+async def get_filtered_intakes(
+    # Intake-specific filters
+    min_intake_time: Optional[datetime] = Query(None, description="Minimum intake time (ISO format)"),
+    max_intake_time: Optional[datetime] = Query(None, description="Maximum intake time (ISO format)"),
+    min_portion_size: Optional[float] = Query(None, ge=0, description="Minimum portion size"),
+    max_portion_size: Optional[float] = Query(None, ge=0, description="Maximum portion size"),
+    min_water_ml: Optional[int] = Query(None, ge=0, description="Minimum water intake in ml"),
+    max_water_ml: Optional[int] = Query(None, ge=0, description="Maximum water intake in ml"),
+    # Dish-based filters
+    dish_search: Optional[str] = Query(None, description="Search term for dish name, description, or cuisine"),
+    cuisine: Optional[str] = Query(None, description="Filter by dish cuisine type"),
+    has_image: Optional[bool] = Query(None, description="Filter by dish image availability"),
+    min_prep_time: Optional[int] = Query(None, ge=0, description="Minimum dish preparation time in minutes"),
+    max_prep_time: Optional[int] = Query(None, ge=0, description="Maximum dish preparation time in minutes"),
+    min_cook_time: Optional[int] = Query(None, ge=0, description="Minimum dish cooking time in minutes"),
+    max_cook_time: Optional[int] = Query(None, ge=0, description="Maximum dish cooking time in minutes"),
+    min_servings: Optional[int] = Query(None, ge=1, description="Minimum dish number of servings"),
+    max_servings: Optional[int] = Query(None, ge=1, description="Maximum dish number of servings"),
+    min_calories: Optional[float] = Query(None, ge=0, description="Minimum dish calories per serving"),
+    max_calories: Optional[float] = Query(None, ge=0, description="Maximum dish calories per serving"),
+    min_protein: Optional[float] = Query(None, ge=0, description="Minimum dish protein in grams"),
+    max_protein: Optional[float] = Query(None, ge=0, description="Maximum dish protein in grams"),
+    min_carbs: Optional[float] = Query(None, ge=0, description="Minimum dish carbohydrates in grams"),
+    max_carbs: Optional[float] = Query(None, ge=0, description="Maximum dish carbohydrates in grams"),
+    min_fats: Optional[float] = Query(None, ge=0, description="Minimum dish fats in grams"),
+    max_fats: Optional[float] = Query(None, ge=0, description="Maximum dish fats in grams"),
+    min_sugar: Optional[float] = Query(None, ge=0, description="Minimum dish sugar in grams"),
+    max_sugar: Optional[float] = Query(None, ge=0, description="Maximum dish sugar in grams"),
+    # Pagination
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get intakes with comprehensive filtering support including dish-based filters."""
+    return IntakeService.get_filtered_intakes(
+        db=db,
+        current_user_id=current_user.id,
+        min_intake_time=min_intake_time,
+        max_intake_time=max_intake_time,
+        min_portion_size=min_portion_size,
+        max_portion_size=max_portion_size,
+        min_water_ml=min_water_ml,
+        max_water_ml=max_water_ml,
+        dish_search=dish_search,
+        cuisine=cuisine,
+        has_image=has_image,
+        min_prep_time=min_prep_time,
+        max_prep_time=max_prep_time,
+        min_cook_time=min_cook_time,
+        max_cook_time=max_cook_time,
+        min_servings=min_servings,
+        max_servings=max_servings,
+        min_calories=min_calories,
+        max_calories=max_calories,
+        min_protein=min_protein,
+        max_protein=max_protein,
+        min_carbs=min_carbs,
+        max_carbs=max_carbs,
+        min_fats=min_fats,
+        max_fats=max_fats,
+        min_sugar=min_sugar,
+        max_sugar=max_sugar,
+        page=page,
+        page_size=page_size
+    )
+
+
 @router.get("/{intake_id}", response_model=IntakeResponse)
 async def get_intake(
     intake_id: int,

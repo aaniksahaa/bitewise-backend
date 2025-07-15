@@ -153,6 +153,58 @@ async def get_avg_ingredient_count(
     )
 
 
+@router.get("/filter", response_model=DishListResponse)
+async def get_filtered_dishes(
+    search: Optional[str] = Query(None, description="Search term for name, description, or cuisine"),
+    cuisine: Optional[str] = Query(None, description="Filter by cuisine type"),
+    has_image: Optional[bool] = Query(None, description="Filter by image availability"),
+    min_prep_time: Optional[int] = Query(None, ge=0, description="Minimum preparation time in minutes"),
+    max_prep_time: Optional[int] = Query(None, ge=0, description="Maximum preparation time in minutes"),
+    min_cook_time: Optional[int] = Query(None, ge=0, description="Minimum cooking time in minutes"),
+    max_cook_time: Optional[int] = Query(None, ge=0, description="Maximum cooking time in minutes"),
+    min_servings: Optional[int] = Query(None, ge=1, description="Minimum number of servings"),
+    max_servings: Optional[int] = Query(None, ge=1, description="Maximum number of servings"),
+    min_calories: Optional[float] = Query(None, ge=0, description="Minimum calories per serving"),
+    max_calories: Optional[float] = Query(None, ge=0, description="Maximum calories per serving"),
+    min_protein: Optional[float] = Query(None, ge=0, description="Minimum protein in grams"),
+    max_protein: Optional[float] = Query(None, ge=0, description="Maximum protein in grams"),
+    min_carbs: Optional[float] = Query(None, ge=0, description="Minimum carbohydrates in grams"),
+    max_carbs: Optional[float] = Query(None, ge=0, description="Maximum carbohydrates in grams"),
+    min_fats: Optional[float] = Query(None, ge=0, description="Minimum fats in grams"),
+    max_fats: Optional[float] = Query(None, ge=0, description="Maximum fats in grams"),
+    min_sugar: Optional[float] = Query(None, ge=0, description="Minimum sugar in grams"),
+    max_sugar: Optional[float] = Query(None, ge=0, description="Maximum sugar in grams"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db)
+):
+    """Get dishes with comprehensive filtering support."""
+    return DishService.get_filtered_dishes(
+        db=db,
+        search=search,
+        cuisine=cuisine,
+        has_image=has_image,
+        min_prep_time=min_prep_time,
+        max_prep_time=max_prep_time,
+        min_cook_time=min_cook_time,
+        max_cook_time=max_cook_time,
+        min_servings=min_servings,
+        max_servings=max_servings,
+        min_calories=min_calories,
+        max_calories=max_calories,
+        min_protein=min_protein,
+        max_protein=max_protein,
+        min_carbs=min_carbs,
+        max_carbs=max_carbs,
+        min_fats=min_fats,
+        max_fats=max_fats,
+        min_sugar=min_sugar,
+        max_sugar=max_sugar,
+        page=page,
+        page_size=page_size
+    )
+
+
 @router.get("/{dish_id}", response_model=DishResponse)
 async def get_dish(
     dish_id: int,

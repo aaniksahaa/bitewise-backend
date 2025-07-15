@@ -421,7 +421,185 @@ class IntakeService:
             end_time=end_of_day,
             page=1,
             page_size=100  # Get all today's calendar day intakes without pagination
-        ) 
+        )
+
+    @staticmethod
+    def get_filtered_intakes(
+        db: Session,
+        current_user_id: int,
+        # Intake-specific filters
+        min_intake_time: Optional[datetime] = None,
+        max_intake_time: Optional[datetime] = None,
+        min_portion_size: Optional[float] = None,
+        max_portion_size: Optional[float] = None,
+        min_water_ml: Optional[int] = None,
+        max_water_ml: Optional[int] = None,
+        # Dish-based filters (searching within the associated dish)
+        dish_search: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        has_image: Optional[bool] = None,
+        min_prep_time: Optional[int] = None,
+        max_prep_time: Optional[int] = None,
+        min_cook_time: Optional[int] = None,
+        max_cook_time: Optional[int] = None,
+        min_servings: Optional[int] = None,
+        max_servings: Optional[int] = None,
+        min_calories: Optional[float] = None,
+        max_calories: Optional[float] = None,
+        min_protein: Optional[float] = None,
+        max_protein: Optional[float] = None,
+        min_carbs: Optional[float] = None,
+        max_carbs: Optional[float] = None,
+        min_fats: Optional[float] = None,
+        max_fats: Optional[float] = None,
+        min_sugar: Optional[float] = None,
+        max_sugar: Optional[float] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> IntakeListResponse:
+        """Get intakes with comprehensive filtering support including dish-based filters."""
+        
+        intake_logger.debug(f"🔍 Filtering intakes with comprehensive criteria", "FILTER",
+                           user_id=current_user_id,
+                           min_intake_time=min_intake_time, max_intake_time=max_intake_time,
+                           dish_search=dish_search, cuisine=cuisine, has_image=has_image,
+                           min_prep_time=min_prep_time, max_prep_time=max_prep_time,
+                           min_cook_time=min_cook_time, max_cook_time=max_cook_time,
+                           min_servings=min_servings, max_servings=max_servings,
+                           min_calories=min_calories, max_calories=max_calories,
+                           min_protein=min_protein, max_protein=max_protein,
+                           min_carbs=min_carbs, max_carbs=max_carbs,
+                           min_fats=min_fats, max_fats=max_fats,
+                           min_sugar=min_sugar, max_sugar=max_sugar,
+                           page=page, page_size=page_size)
+        
+        # Start with base query joining intake and dish
+        query = db.query(Intake).options(joinedload(Intake.dish)).join(Dish).filter(
+            Intake.user_id == current_user_id
+        )
+        
+        # Intake-specific filters
+        if min_intake_time is not None:
+            query = query.filter(Intake.intake_time >= min_intake_time)
+        if max_intake_time is not None:
+            query = query.filter(Intake.intake_time <= max_intake_time)
+        
+        if min_portion_size is not None:
+            query = query.filter(Intake.portion_size >= min_portion_size)
+        if max_portion_size is not None:
+            query = query.filter(Intake.portion_size <= max_portion_size)
+        
+        if min_water_ml is not None:
+            query = query.filter(Intake.water_ml >= min_water_ml)
+        if max_water_ml is not None:
+            query = query.filter(Intake.water_ml <= max_water_ml)
+        
+        # Dish-based filters (searching the associated dish)
+        if dish_search and dish_search.strip():
+            search_term = f"%{dish_search.strip()}%"
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    Dish.name.ilike(search_term),
+                    Dish.description.ilike(search_term),
+                    Dish.cuisine.ilike(search_term)
+                )
+            )
+        
+        if cuisine:
+            query = query.filter(Dish.cuisine.ilike(f"%{cuisine}%"))
+        
+        # Image availability filter for dish
+        if has_image is not None:
+            if has_image:
+                query = query.filter(
+                    and_(
+                        Dish.image_urls.isnot(None),
+                        func.array_length(Dish.image_urls, 1) > 0
+                    )
+                )
+            else:
+                from sqlalchemy import or_
+                query = query.filter(
+                    or_(
+                        Dish.image_urls.is_(None),
+                        func.array_length(Dish.image_urls, 1) == 0
+                    )
+                )
+        
+        # Dish prep/cook time filters
+        if min_prep_time is not None:
+            query = query.filter(Dish.prep_time_minutes >= min_prep_time)
+        if max_prep_time is not None:
+            query = query.filter(Dish.prep_time_minutes <= max_prep_time)
+        
+        if min_cook_time is not None:
+            query = query.filter(Dish.cook_time_minutes >= min_cook_time)
+        if max_cook_time is not None:
+            query = query.filter(Dish.cook_time_minutes <= max_cook_time)
+        
+        # Dish servings filters
+        if min_servings is not None:
+            query = query.filter(Dish.servings >= min_servings)
+        if max_servings is not None:
+            query = query.filter(Dish.servings <= max_servings)
+        
+        # Dish nutritional filters
+        if min_calories is not None:
+            query = query.filter(Dish.calories >= min_calories)
+        if max_calories is not None:
+            query = query.filter(Dish.calories <= max_calories)
+        
+        if min_protein is not None:
+            query = query.filter(Dish.protein_g >= min_protein)
+        if max_protein is not None:
+            query = query.filter(Dish.protein_g <= max_protein)
+        
+        if min_carbs is not None:
+            query = query.filter(Dish.carbs_g >= min_carbs)
+        if max_carbs is not None:
+            query = query.filter(Dish.carbs_g <= max_carbs)
+        
+        if min_fats is not None:
+            query = query.filter(Dish.fats_g >= min_fats)
+        if max_fats is not None:
+            query = query.filter(Dish.fats_g <= max_fats)
+        
+        if min_sugar is not None:
+            query = query.filter(Dish.sugar_g >= min_sugar)
+        if max_sugar is not None:
+            query = query.filter(Dish.sugar_g <= max_sugar)
+        
+        # Order by intake_time descending (most recent first)
+        query = query.order_by(Intake.intake_time.desc())
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        intakes = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format with dish details
+        intake_items = [IntakeService._create_intake_list_item(intake) for intake in intakes]
+        
+        # Calculate nutritional summary for the current page
+        nutritional_summary = IntakeService._calculate_nutritional_summary(intakes)
+        
+        intake_logger.success(f"Found {total_count} intakes with filters", "FILTER",
+                            returned_count=len(intakes), total_count=total_count)
+        
+        return IntakeListResponse(
+            intakes=intake_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            nutritional_summary=nutritional_summary
+        )
 
     @staticmethod
     def get_daily_nutrition_summary(db: Session, user_id: int, target_date: date) -> dict:
