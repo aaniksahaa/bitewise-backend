@@ -268,7 +268,7 @@ class DishService:
                 detail="Not authorized to delete this dish"
             )
         
-        db.delete(dish)
+        await db.delete(dish)
         await db.commit()
         
         return True
