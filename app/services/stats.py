@@ -1,8 +1,9 @@
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, date, timedelta
 from decimal import Decimal
-from sqlalchemy.orm import Session
-from sqlalchemy import func, extract, and_, case, desc
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, extract, and_, case, desc, select
 from collections import defaultdict
 import statistics
 
@@ -81,9 +82,11 @@ class StatsService:
         )
 
     @staticmethod
-    def _get_user_goal_calories(db: Session, user_id: int) -> Decimal:
+    async def _get_user_goal_calories(db: AsyncSession, user_id: int) -> Decimal:
         """Get user's daily calorie goal from their profile and health data."""
-        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        # profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        # modified for asyncio
+        profile = (await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))).scalars().first()
         if not profile:
             return Decimal("2000")  # Default goal
         
@@ -131,22 +134,32 @@ class StatsService:
         return grouped
 
     @staticmethod
-    def calculate_calorie_stats(
-        db: Session, 
+    async def calculate_calorie_stats(
+        db: AsyncSession, 
         user_id: int, 
         time_range: StatsTimeRange
     ) -> CalorieStats:
         """Calculate comprehensive calorie statistics."""
         # Get intakes in the specified range
-        intakes = db.query(Intake).join(Dish).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= time_range.start_date,
-                func.date(Intake.intake_time) <= time_range.end_date
+        # intakes = db.query(Intake).join(Dish).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= time_range.start_date,
+        #         func.date(Intake.intake_time) <= time_range.end_date
+        #     )
+        # ).all()
+        # modified for asyncio
+        intakes = (await db.execute(
+            select(Intake).options(joinedload(Intake.dish)).where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= time_range.start_date,
+                    func.date(Intake.intake_time) <= time_range.end_date
+                )
             )
-        ).all()
+        )).scalars().all()
 
-        goal_calories = StatsService._get_user_goal_calories(db, user_id)
+        goal_calories = await StatsService._get_user_goal_calories(db, user_id)
         grouped_intakes = StatsService._aggregate_intakes_by_period(
             intakes, time_range.period, time_range.start_date, time_range.end_date
         )
@@ -214,19 +227,29 @@ class StatsService:
         )
 
     @staticmethod
-    def calculate_macronutrient_stats(
-        db: Session, 
+    async def calculate_macronutrient_stats(
+        db: AsyncSession, 
         user_id: int, 
         time_range: StatsTimeRange
     ) -> MacronutrientStats:
         """Calculate macronutrient distribution and trends."""
-        intakes = db.query(Intake).join(Dish).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= time_range.start_date,
-                func.date(Intake.intake_time) <= time_range.end_date
+        # intakes = db.query(Intake).join(Dish).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= time_range.start_date,
+        #         func.date(Intake.intake_time) <= time_range.end_date
+        #     )
+        # ).all()
+        # modified for asyncio
+        intakes = (await db.execute(
+            select(Intake).options(joinedload(Intake.dish)).where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= time_range.start_date,
+                    func.date(Intake.intake_time) <= time_range.end_date
+                )
             )
-        ).all()
+        )).scalars().all()
 
         # Calculate current breakdown
         total_carbs = total_protein = total_fats = Decimal("0")
@@ -318,19 +341,29 @@ class StatsService:
         )
 
     @staticmethod
-    def calculate_micronutrient_stats(
-        db: Session, 
+    async def calculate_micronutrient_stats(
+        db: AsyncSession, 
         user_id: int, 
         time_range: StatsTimeRange
     ) -> MicronutrientStats:
         """Calculate micronutrient intake and deficiency alerts."""
-        intakes = db.query(Intake).join(Dish).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= time_range.start_date,
-                func.date(Intake.intake_time) <= time_range.end_date
+        # intakes = db.query(Intake).join(Dish).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= time_range.start_date,
+        #         func.date(Intake.intake_time) <= time_range.end_date
+        #     )
+        # ).all()
+        # modified for asyncio
+        intakes = (await db.execute(
+            select(Intake).options(joinedload(Intake.dish)).where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= time_range.start_date,
+                    func.date(Intake.intake_time) <= time_range.end_date
+                )
             )
-        ).all()
+        )).scalars().all()
 
         # Initialize totals
         micronutrient_totals = {nutrient: Decimal("0") for nutrient in StatsService.DAILY_VALUES.keys()}
@@ -390,19 +423,29 @@ class StatsService:
         )
 
     @staticmethod
-    def calculate_consumption_pattern_stats(
-        db: Session, 
+    async def calculate_consumption_pattern_stats(
+        db: AsyncSession, 
         user_id: int, 
         time_range: StatsTimeRange
     ) -> ConsumptionPatternStats:
         """Calculate food consumption pattern statistics."""
-        intakes = db.query(Intake).join(Dish).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= time_range.start_date,
-                func.date(Intake.intake_time) <= time_range.end_date
+        # intakes = db.query(Intake).join(Dish).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= time_range.start_date,
+        #         func.date(Intake.intake_time) <= time_range.end_date
+        #     )
+        # ).all()
+        # modified for asyncio
+        intakes = (await db.execute(
+            select(Intake).options(joinedload(Intake.dish)).where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= time_range.start_date,
+                    func.date(Intake.intake_time) <= time_range.end_date
+                )
             )
-        ).all()
+        )).scalars().all()
 
         # Dish frequency analysis
         dish_stats = defaultdict(lambda: {
@@ -509,36 +552,61 @@ class StatsService:
         )
 
     @staticmethod
-    def calculate_progress_stats(
-        db: Session, 
+    async def calculate_progress_stats(
+        db: AsyncSession, 
         user_id: int, 
         time_range: StatsTimeRange
     ) -> ProgressStats:
         """Calculate health and fitness progress statistics."""
         # Get health history data
-        health_data = db.query(HealthHistory).filter(
-            and_(
-                HealthHistory.user_id == user_id,
-                func.date(HealthHistory.change_timestamp) >= time_range.start_date,
-                func.date(HealthHistory.change_timestamp) <= time_range.end_date
-            )
-        ).order_by(HealthHistory.change_timestamp).all()
+        # health_data = db.query(HealthHistory).filter(
+        #     and_(
+        #         HealthHistory.user_id == user_id,
+        #         func.date(HealthHistory.change_timestamp) >= time_range.start_date,
+        #         func.date(HealthHistory.change_timestamp) <= time_range.end_date
+        #     )
+        # ).order_by(HealthHistory.change_timestamp).all()
+        # modified for asyncio
+        health_data = (await db.execute(
+            select(HealthHistory).where(
+                and_(
+                    HealthHistory.user_id == user_id,
+                    func.date(HealthHistory.change_timestamp) >= time_range.start_date,
+                    func.date(HealthHistory.change_timestamp) <= time_range.end_date
+                )
+            ).order_by(HealthHistory.change_timestamp)
+        )).scalars().all()
 
         # Get user profile for goal tracking
-        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
-        goal_calories = StatsService._get_user_goal_calories(db, user_id)
+        # profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        # modified for asyncio
+        profile = (await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))).scalars().first()
+        goal_calories = await StatsService._get_user_goal_calories(db, user_id)
 
         # Get daily calorie intakes
-        daily_intakes = db.query(
-            func.date(Intake.intake_time).label('date'),
-            func.sum(Dish.calories * Intake.portion_size).label('total_calories')
-        ).join(Dish).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= time_range.start_date,
-                func.date(Intake.intake_time) <= time_range.end_date
-            )
-        ).group_by(func.date(Intake.intake_time)).all()
+        # daily_intakes = db.query(
+        #     func.date(Intake.intake_time).label('date'),
+        #     func.sum(Dish.calories * Intake.portion_size).label('total_calories')
+        # ).join(Dish).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= time_range.start_date,
+        #         func.date(Intake.intake_time) <= time_range.end_date
+        #     )
+        # ).group_by(func.date(Intake.intake_time)).all()
+        # modified for asyncio
+        daily_intakes = (await db.execute(
+            select(
+                func.date(Intake.intake_time).label('date'),
+                func.sum(Dish.calories * Intake.portion_size).label('total_calories')
+            ).select_from(Intake).join(Dish).where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= time_range.start_date,
+                    func.date(Intake.intake_time) <= time_range.end_date
+                )
+            ).group_by(func.date(Intake.intake_time))
+        )).all()
 
         # Create health metrics data points
         health_metrics = []
@@ -622,18 +690,18 @@ class StatsService:
         )
 
     @staticmethod
-    def calculate_comprehensive_stats(
-        db: Session, 
+    async def calculate_comprehensive_stats(
+        db: AsyncSession, 
         user_id: int, 
         time_range: StatsTimeRange
     ) -> ComprehensiveStats:
         """Calculate all statistics for comprehensive overview."""
         # Calculate all individual stats
-        calorie_stats = StatsService.calculate_calorie_stats(db, user_id, time_range)
-        macronutrient_stats = StatsService.calculate_macronutrient_stats(db, user_id, time_range)
-        micronutrient_stats = StatsService.calculate_micronutrient_stats(db, user_id, time_range)
-        consumption_patterns = StatsService.calculate_consumption_pattern_stats(db, user_id, time_range)
-        progress_stats = StatsService.calculate_progress_stats(db, user_id, time_range)
+        calorie_stats = await StatsService.calculate_calorie_stats(db, user_id, time_range)
+        macronutrient_stats = await StatsService.calculate_macronutrient_stats(db, user_id, time_range)
+        micronutrient_stats = await StatsService.calculate_micronutrient_stats(db, user_id, time_range)
+        consumption_patterns = await StatsService.calculate_consumption_pattern_stats(db, user_id, time_range)
+        progress_stats = await StatsService.calculate_progress_stats(db, user_id, time_range)
 
         # Create nutrition overview
         nutrition_overview = NutritionOverview(
@@ -703,37 +771,63 @@ class StatsService:
         )
 
     @staticmethod
-    def calculate_quick_stats(db: Session, user_id: int) -> QuickStats:
+    async def calculate_quick_stats(db: AsyncSession, user_id: int) -> QuickStats:
         """Calculate quick stats for dashboard display."""
         today = date.today()
         week_ago = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
 
         # Today's calories
-        today_calories = db.query(
-            func.sum(Dish.calories * Intake.portion_size)
-        ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) == today
+        # today_calories = db.query(
+        #     func.sum(Dish.calories * Intake.portion_size)
+        # ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) == today
+        #     )
+        # ).scalar() or Decimal("0")
+        # modified for asyncio
+        today_calories_result = await db.execute(
+            select(func.sum(Dish.calories * Intake.portion_size))
+            .select_from(Intake).join(Dish, Intake.dish_id == Dish.id)
+            .where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) == today
+                )
             )
-        ).scalar() or Decimal("0")
+        )
+        today_calories = today_calories_result.scalar() or Decimal("0")
 
         # Goal percentage
-        goal_calories = StatsService._get_user_goal_calories(db, user_id)
+        goal_calories = await StatsService._get_user_goal_calories(db, user_id)
         today_goal_percentage = (today_calories / goal_calories * 100) if goal_calories > 0 else Decimal("0")
 
         # Weekly average - simplified approach
-        weekly_intakes = db.query(
-            func.date(Intake.intake_time).label('date'),
-            func.sum(Dish.calories * Intake.portion_size).label('daily_calories')
-        ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= week_ago,
-                func.date(Intake.intake_time) <= today
-            )
-        ).group_by(func.date(Intake.intake_time)).all()
+        # weekly_intakes = db.query(
+        #     func.date(Intake.intake_time).label('date'),
+        #     func.sum(Dish.calories * Intake.portion_size).label('daily_calories')
+        # ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= week_ago,
+        #         func.date(Intake.intake_time) <= today
+        #     )
+        # ).group_by(func.date(Intake.intake_time)).all()
+        # modified for asyncio
+        weekly_intakes = (await db.execute(
+            select(
+                func.date(Intake.intake_time).label('date'),
+                func.sum(Dish.calories * Intake.portion_size).label('daily_calories')
+            ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id)
+            .where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= week_ago,
+                    func.date(Intake.intake_time) <= today
+                )
+            ).group_by(func.date(Intake.intake_time))
+        )).all()
 
         # Calculate average from the daily totals
         if weekly_intakes:
@@ -743,34 +837,63 @@ class StatsService:
             weekly_avg = Decimal("0")
 
         # Top cuisine this week
-        top_cuisine = db.query(
-            Dish.cuisine,
-            func.count(Intake.id).label('intake_count')
-        ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id).filter(
-            and_(
-                Intake.user_id == user_id,
-                func.date(Intake.intake_time) >= week_ago,
-                Dish.cuisine.isnot(None)
-            )
-        ).group_by(Dish.cuisine).order_by(desc('intake_count')).first()
+        # top_cuisine = db.query(
+        #     Dish.cuisine,
+        #     func.count(Intake.id).label('intake_count')
+        # ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id).filter(
+        #     and_(
+        #         Intake.user_id == user_id,
+        #         func.date(Intake.intake_time) >= week_ago,
+        #         Dish.cuisine.isnot(None)
+        #     )
+        # ).group_by(Dish.cuisine).order_by(desc('intake_count')).first()
+        # modified for asyncio
+        top_cuisine = (await db.execute(
+            select(
+                Dish.cuisine,
+                func.count(Intake.id).label('intake_count')
+            ).select_from(Intake).join(Dish, Intake.dish_id == Dish.id)
+            .where(
+                and_(
+                    Intake.user_id == user_id,
+                    func.date(Intake.intake_time) >= week_ago,
+                    Dish.cuisine.isnot(None)
+                )
+            ).group_by(Dish.cuisine).order_by(desc('intake_count'))
+        )).first()
 
         top_cuisine_name = top_cuisine.cuisine if top_cuisine else None
 
         # Total dishes tried (all time)
-        total_dishes_tried = db.query(func.count(func.distinct(Intake.dish_id))).filter(
-            Intake.user_id == user_id
-        ).scalar() or 0
+        # total_dishes_tried = db.query(func.count(func.distinct(Intake.dish_id))).filter(
+        #     Intake.user_id == user_id
+        # ).scalar() or 0
+        # modified for asyncio
+        total_dishes_tried_result = await db.execute(
+            select(func.count(func.distinct(Intake.dish_id)))
+            .where(Intake.user_id == user_id)
+        )
+        total_dishes_tried = total_dishes_tried_result.scalar() or 0
 
         # Calculate current streak (simplified - consecutive days with intakes)
         current_streak = 0
         check_date = today
         while True:
-            has_intake = db.query(Intake).filter(
-                and_(
-                    Intake.user_id == user_id,
-                    func.date(Intake.intake_time) == check_date
+            # has_intake = db.query(Intake).filter(
+            #     and_(
+            #         Intake.user_id == user_id,
+            #         func.date(Intake.intake_time) == check_date
+            #     )
+            # ).first()
+            # modified for asyncio
+            has_intake = (await db.execute(
+                select(Intake).where(
+                    and_(
+                        Intake.user_id == user_id,
+                        func.date(Intake.intake_time) == check_date
+                    )
                 )
-            ).first()
+            )).scalars().first()
             
             if has_intake:
                 current_streak += 1
@@ -784,19 +907,37 @@ class StatsService:
 
         # Weight change this month (requires health history)
         weight_change = None
-        recent_weight = db.query(HealthHistory.weight_kg).filter(
-            and_(
-                HealthHistory.user_id == user_id,
-                func.date(HealthHistory.change_timestamp) >= month_ago
-            )
-        ).order_by(desc(HealthHistory.change_timestamp)).first()
+        # recent_weight = db.query(HealthHistory.weight_kg).filter(
+        #     and_(
+        #         HealthHistory.user_id == user_id,
+        #         func.date(HealthHistory.change_timestamp) >= month_ago
+        #     )
+        # ).order_by(desc(HealthHistory.change_timestamp)).first()
+        # modified for asyncio
+        recent_weight = (await db.execute(
+            select(HealthHistory.weight_kg).where(
+                and_(
+                    HealthHistory.user_id == user_id,
+                    func.date(HealthHistory.change_timestamp) >= month_ago
+                )
+            ).order_by(desc(HealthHistory.change_timestamp))
+        )).first()
 
-        month_ago_weight = db.query(HealthHistory.weight_kg).filter(
-            and_(
-                HealthHistory.user_id == user_id,
-                func.date(HealthHistory.change_timestamp) <= month_ago
-            )
-        ).order_by(desc(HealthHistory.change_timestamp)).first()
+        # month_ago_weight = db.query(HealthHistory.weight_kg).filter(
+        #     and_(
+        #         HealthHistory.user_id == user_id,
+        #         func.date(HealthHistory.change_timestamp) <= month_ago
+        #     )
+        # ).order_by(desc(HealthHistory.change_timestamp)).first()
+        # modified for asyncio
+        month_ago_weight = (await db.execute(
+            select(HealthHistory.weight_kg).where(
+                and_(
+                    HealthHistory.user_id == user_id,
+                    func.date(HealthHistory.change_timestamp) <= month_ago
+                )
+            ).order_by(desc(HealthHistory.change_timestamp))
+        )).first()
 
         if recent_weight and month_ago_weight and recent_weight.weight_kg and month_ago_weight.weight_kg:
             weight_change = recent_weight.weight_kg - month_ago_weight.weight_kg
@@ -813,68 +954,68 @@ class StatsService:
 
     # Simplified API methods using SimpleTimeRange
     @staticmethod
-    def calculate_simple_calorie_stats(
-        db: Session, 
+    async def calculate_simple_calorie_stats(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> CalorieStats:
         """Calculate calorie stats using simplified time range."""
         time_range = StatsService.convert_simple_to_full_range(simple_range)
-        return StatsService.calculate_calorie_stats(db, user_id, time_range)
+        return await StatsService.calculate_calorie_stats(db, user_id, time_range)
 
     @staticmethod
-    def calculate_simple_macronutrient_stats(
-        db: Session, 
+    async def calculate_simple_macronutrient_stats(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> MacronutrientStats:
         """Calculate macronutrient stats using simplified time range."""
         time_range = StatsService.convert_simple_to_full_range(simple_range)
-        return StatsService.calculate_macronutrient_stats(db, user_id, time_range)
+        return await StatsService.calculate_macronutrient_stats(db, user_id, time_range)
 
     @staticmethod
-    def calculate_simple_micronutrient_stats(
-        db: Session, 
+    async def calculate_simple_micronutrient_stats(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> MicronutrientStats:
         """Calculate micronutrient stats using simplified time range."""
         time_range = StatsService.convert_simple_to_full_range(simple_range)
-        return StatsService.calculate_micronutrient_stats(db, user_id, time_range)
+        return await StatsService.calculate_micronutrient_stats(db, user_id, time_range)
 
     @staticmethod
-    def calculate_simple_consumption_patterns(
-        db: Session, 
+    async def calculate_simple_consumption_patterns(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> ConsumptionPatternStats:
         """Calculate consumption patterns using simplified time range."""
         time_range = StatsService.convert_simple_to_full_range(simple_range)
-        return StatsService.calculate_consumption_pattern_stats(db, user_id, time_range)
+        return await StatsService.calculate_consumption_pattern_stats(db, user_id, time_range)
 
     @staticmethod
-    def calculate_simple_progress_stats(
-        db: Session, 
+    async def calculate_simple_progress_stats(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> ProgressStats:
         """Calculate progress stats using simplified time range."""
         time_range = StatsService.convert_simple_to_full_range(simple_range)
-        return StatsService.calculate_progress_stats(db, user_id, time_range)
+        return await StatsService.calculate_progress_stats(db, user_id, time_range)
 
     @staticmethod
-    def calculate_simple_comprehensive_stats(
-        db: Session, 
+    async def calculate_simple_comprehensive_stats(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> ComprehensiveStats:
         """Calculate comprehensive stats using simplified time range."""
         time_range = StatsService.convert_simple_to_full_range(simple_range)
-        return StatsService.calculate_comprehensive_stats(db, user_id, time_range)
+        return await StatsService.calculate_comprehensive_stats(db, user_id, time_range)
 
     @staticmethod
-    def calculate_simple_nutrition_overview(
-        db: Session, 
+    async def calculate_simple_nutrition_overview(
+        db: AsyncSession, 
         user_id: int, 
         simple_range: SimpleTimeRange
     ) -> NutritionOverview:
@@ -882,9 +1023,9 @@ class StatsService:
         time_range = StatsService.convert_simple_to_full_range(simple_range)
         
         # Calculate individual nutrition stats
-        calorie_stats = StatsService.calculate_calorie_stats(db, user_id, time_range)
-        macronutrient_stats = StatsService.calculate_macronutrient_stats(db, user_id, time_range)
-        micronutrient_stats = StatsService.calculate_micronutrient_stats(db, user_id, time_range)
+        calorie_stats = await StatsService.calculate_calorie_stats(db, user_id, time_range)
+        macronutrient_stats = await StatsService.calculate_macronutrient_stats(db, user_id, time_range)
+        micronutrient_stats = await StatsService.calculate_micronutrient_stats(db, user_id, time_range)
         
         return NutritionOverview(
             calorie_stats=calorie_stats,
