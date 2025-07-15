@@ -371,6 +371,8 @@ class IntakeService:
     @staticmethod
     def delete_intake(db: Session, intake_id: int, current_user_id: int) -> bool:
         """Delete an intake (only for the current user)."""
+        print('here')
+
         intake = db.query(Intake).filter(
             and_(
                 Intake.id == intake_id,
@@ -379,6 +381,7 @@ class IntakeService:
         ).first()
         
         if not intake:
+            print('not found')
             return False
         
         db.delete(intake)
