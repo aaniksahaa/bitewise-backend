@@ -24,5 +24,5 @@ class Base:
     # Common columns for all models
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     # datetime.utcnow is deprecated, use datetime.now(timezone.utc) instead
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)) 
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)) 

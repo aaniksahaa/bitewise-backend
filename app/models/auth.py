@@ -14,8 +14,8 @@ class OTP(Base):
     code = Column(String, nullable=False)
     purpose = Column(String, nullable=False)  # login, register, reset-password
     is_used = Column(Boolean, default=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", backref="otps")
 
@@ -26,9 +26,9 @@ class RefreshToken(Base):
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, nullable=False, index=True, unique=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     is_revoked = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", backref="refresh_tokens")
 
@@ -40,7 +40,7 @@ class PasswordResetRequest(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     request_id = Column(String, nullable=False, index=True, unique=True)
     is_used = Column(Boolean, default=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", backref="password_reset_requests") 
