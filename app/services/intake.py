@@ -406,6 +406,27 @@ class IntakeService:
             page=1,
             page_size=100  # Get all intakes from last 24 hours without pagination
         )
+    
+    @staticmethod
+    def get_prev_intakes(prev_day: int, db: Session, current_user_id: int) -> IntakeListResponse:
+        """Get all intakes from the last 24 hours for the current user."""
+        from datetime import datetime, timezone, timedelta
+
+        # print(prev_day)
+        # prev_day = int(prev_day/6)
+        
+        # Get current time and 24 hours ago
+        now = datetime.now(timezone.utc) - timedelta(hours=prev_day*24)
+        twenty_four_hours_ago = now - timedelta(hours=24)
+        
+        return IntakeService.get_intakes_by_period(
+            db=db,
+            current_user_id=current_user_id,
+            start_time=twenty_four_hours_ago,
+            end_time=now,
+            page=1,
+            page_size=100  # Get all intakes from last 24 hours without pagination
+        )
 
     @staticmethod
     def get_calendar_day_intakes(db: Session, current_user_id: int) -> IntakeListResponse:
