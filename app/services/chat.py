@@ -88,17 +88,32 @@ class ChatService:
     def get_user_conversations(
         db: Session,
         current_user_id: int,
+        keyword: Optional[str] = "",
         page: int = 1,
         page_size: int = 20,
         status: Optional[ConversationStatus] = None
     ) -> ConversationListResponse:
         """Get all conversations for the current user with pagination."""
-        query = db.query(Conversation).filter(
-            and_(
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        if keyword != "":
+            query = db.query(Conversation).join(Message).filter(
+                and_(
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED,
+                    Message.content.ilike(f"%{keyword}%")
+                )
             )
-        )
+        else:
+            query = db.query(Conversation).filter(
+                and_(
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED,
+                )
+            )
+
+        # if keyword != "":
+        #     query = query.filter(Conversation.title.ilike(f"%{keyword}%"))
+            
+        # )
         
         # Apply status filter if provided
         if status:

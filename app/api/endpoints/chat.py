@@ -70,6 +70,7 @@ async def create_conversation(
 
 @router.get("/conversations", response_model=ConversationListResponse)
 async def get_conversations(
+    keyword: Optional[str] = Query(..., description="Search by keyword"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status_filter: Optional[ConversationStatus] = Query(None, description="Filter by conversation status"),
@@ -79,6 +80,7 @@ async def get_conversations(
     """Get all conversations for the current user with pagination."""
     return ChatService.get_user_conversations(
         db=db,
+        keyword=keyword,
         current_user_id=current_user.id,
         page=page,
         page_size=page_size,

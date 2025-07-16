@@ -17,7 +17,7 @@ if settings.ENVIRONMENT == "development":
     db_url = settings.LOCAL_DATABASE_URL
 else:
     print("Using PRODUCTION DATABASE URL")
-    db_url = settings.DATABASE_URL
+    db_url = "postgresql://bitewise:BITEWISE321@localhost:5432/bitewise_db"
 
 # Replace any escaped colons in the URL
 if db_url:
