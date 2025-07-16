@@ -68,6 +68,36 @@ async def create_conversation(
         current_user_id=current_user.id
     )
 
+@router.get("/conversations/by-date-range", response_model=ConversationListResponse)
+async def get_conversations_by_date_range(
+    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Number of conversations per page"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get conversations filtered by date range."""
+    try:
+        # Parse dates
+        from datetime import datetime
+        start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+        end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        
+        return ChatService.get_conversations_by_date_range(
+            db=db,
+            current_user_id=current_user.id,
+            start_date=start_datetime,
+            end_date=end_datetime,
+            page=page,
+            page_size=page_size
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date format. Use YYYY-MM-DD format."
+        )
+
 @router.get("/conversations", response_model=ConversationListResponse)
 async def get_conversations(
     page: int = Query(1, ge=1, description="Page number"),
@@ -176,6 +206,38 @@ async def create_message(
         current_user_id=current_user.id,
         is_user_message=True
     )
+
+@router.get("/messages/by-date-range", response_model=MessageListResponse)
+async def get_messages_by_date_range(
+    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
+    conversation_id: Optional[int] = Query(None, description="Filter by specific conversation ID"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Number of messages per page"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get messages filtered by date range, optionally for a specific conversation."""
+    try:
+        # Parse dates
+        from datetime import datetime
+        start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+        end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        
+        return ChatService.get_messages_by_date_range(
+            db=db,
+            current_user_id=current_user.id,
+            start_date=start_datetime,
+            end_date=end_datetime,
+            conversation_id=conversation_id,
+            page=page,
+            page_size=page_size
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date format. Use YYYY-MM-DD format."
+        )
 
 @router.put("/messages/{message_id}", response_model=MessageResponse)
 async def update_message(
@@ -846,3 +908,5 @@ async def confirm_dish_selection(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to confirm dish selection: {str(e)}"
         ) 
+
+ 

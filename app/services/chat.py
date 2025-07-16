@@ -508,3 +508,137 @@ class ChatService:
                 "end": messages[-1].created_at
             }
         ) 
+
+    @staticmethod
+    def get_conversations_by_date_range(
+        db: Session,
+        current_user_id: int,
+        start_date: datetime,
+        end_date: datetime,
+        page: int = 1,
+        page_size: int = 50
+    ) -> ConversationListResponse:
+        """Get conversations within a specific date range."""
+        query = db.query(Conversation).filter(
+            and_(
+                Conversation.user_id == current_user_id,
+                Conversation.status != ConversationStatus.DELETED,
+                Conversation.created_at >= start_date,
+                Conversation.created_at <= end_date
+            )
+        )
+        
+        # Order by created_at descending (newest first)
+        query = query.order_by(desc(Conversation.created_at))
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        conversations = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format with message count
+        conversation_items = []
+        for conv in conversations:
+            # Get message count for this conversation
+            message_count = db.query(func.count(Message.id)).filter(
+                and_(
+                    Message.conversation_id == conv.id,
+                    Message.status != MessageStatus.DELETED
+                )
+            ).scalar()
+            
+            # Get last message for preview
+            last_message = db.query(Message).filter(
+                and_(
+                    Message.conversation_id == conv.id,
+                    Message.status != MessageStatus.DELETED
+                )
+            ).order_by(desc(Message.created_at)).first()
+            
+            conversation_item = ConversationListItem(
+                id=conv.id,
+                title=conv.title,
+                status=conv.status,
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+                message_count=message_count,
+                last_message_preview=last_message.content[:100] + "..." if last_message and len(last_message.content) > 100 else (last_message.content if last_message else None),
+                last_message_at=last_message.created_at if last_message else None
+            )
+            conversation_items.append(conversation_item)
+        
+        return ConversationListResponse(
+            conversations=conversation_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
+
+    @staticmethod
+    def get_messages_by_date_range(
+        db: Session,
+        current_user_id: int,
+        start_date: datetime,
+        end_date: datetime,
+        conversation_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 50
+    ) -> MessageListResponse:
+        """Get messages within a specific date range, optionally filtered by conversation."""
+        query = db.query(Message).filter(
+            and_(
+                Message.user_id == current_user_id,
+                Message.status != MessageStatus.DELETED,
+                Message.created_at >= start_date,
+                Message.created_at <= end_date
+            )
+        )
+        
+        # Filter by conversation if specified
+        if conversation_id:
+            # Verify conversation belongs to user
+            conversation = db.query(Conversation).filter(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
+            ).first()
+            
+            if not conversation:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Conversation not found"
+                )
+            
+            query = query.filter(Message.conversation_id == conversation_id)
+        
+        # Order by created_at descending (newest first)
+        query = query.order_by(desc(Message.created_at))
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        messages = query.offset(offset).limit(page_size).all()
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        # Convert to response format
+        message_items = [MessageResponse.model_validate(message) for message in messages]
+        
+        return MessageListResponse(
+            messages=message_items,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        ) 
