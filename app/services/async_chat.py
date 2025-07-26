@@ -4,8 +4,8 @@ import math
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import desc, func, and_, select
 from fastapi import HTTPException, status
 
 from app.models.conversation import Conversation
@@ -41,12 +41,12 @@ def convert_decimals_to_floats(obj: Any) -> Any:
         return obj
 
 
-class ChatService:
-    """Service class for handling chat operations."""
+class AsyncChatService:
+    """Async service class for handling chat operations."""
     
     @staticmethod
-    def create_conversation(
-        db: Session, 
+    async def create_conversation(
+        db: AsyncSession, 
         conversation_data: ConversationCreate, 
         current_user_id: int
     ) -> ConversationResponse:
@@ -59,25 +59,28 @@ class ChatService:
         )
         
         db.add(db_conversation)
-        db.commit()
-        db.refresh(db_conversation)
+        await db.commit()
+        await db.refresh(db_conversation)
         
         return ConversationResponse.model_validate(db_conversation)
 
     @staticmethod
-    def get_conversation_by_id(
-        db: Session, 
+    async def get_conversation_by_id(
+        db: AsyncSession, 
         conversation_id: int, 
         current_user_id: int
     ) -> Optional[ConversationResponse]:
         """Get a conversation by ID (only for the current user)."""
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             return None
@@ -85,15 +88,15 @@ class ChatService:
         return ConversationResponse.model_validate(conversation)
 
     @staticmethod
-    def get_user_conversations(
-        db: Session,
+    async def get_user_conversations(
+        db: AsyncSession,
         current_user_id: int,
         page: int = 1,
         page_size: int = 20,
         status: Optional[ConversationStatus] = None
     ) -> ConversationListResponse:
         """Get all conversations for the current user with pagination."""
-        query = db.query(Conversation).filter(
+        query = select(Conversation).where(
             and_(
                 Conversation.user_id == current_user_id,
                 Conversation.status != ConversationStatus.DELETED
@@ -102,17 +105,40 @@ class ChatService:
         
         # Apply status filter if provided
         if status:
-            query = query.filter(Conversation.status == status)
+            query = query.where(Conversation.status == status)
         
         # Order by updated_at descending (most recent first)
         query = query.order_by(desc(Conversation.updated_at))
         
         # Get total count
-        total_count = query.count()
+        count_query = select(func.count()).select_from(
+            select(Conversation).where(
+                and_(
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
+            ).subquery()
+        )
+        if status:
+            count_query = select(func.count()).select_from(
+                select(Conversation).where(
+                    and_(
+                        Conversation.user_id == current_user_id,
+                        Conversation.status != ConversationStatus.DELETED,
+                        Conversation.status == status
+                    )
+                ).subquery()
+            )
+        
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
         
         # Apply pagination
         offset = (page - 1) * page_size
-        conversations = query.offset(offset).limit(page_size).all()
+        query = query.offset(offset).limit(page_size)
+        
+        result = await db.execute(query)
+        conversations = result.scalars().all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
@@ -121,18 +147,24 @@ class ChatService:
         conversation_items = []
         for conv in conversations:
             # Get last message for preview
-            last_message = db.query(Message).filter(
-                Message.conversation_id == conv.id
-            ).order_by(desc(Message.created_at)).first()
+            last_message_result = await db.execute(
+                select(Message).where(
+                    Message.conversation_id == conv.id
+                ).order_by(desc(Message.created_at)).limit(1)
+            )
+            last_message = last_message_result.scalar_one_or_none()
             
             # Get unread count (messages not read by user)
-            unread_count = db.query(Message).filter(
-                and_(
-                    Message.conversation_id == conv.id,
-                    Message.is_user_message == False,
-                    Message.status != MessageStatus.READ
+            unread_count_result = await db.execute(
+                select(func.count()).where(
+                    and_(
+                        Message.conversation_id == conv.id,
+                        Message.is_user_message == False,
+                        Message.status != MessageStatus.READ
+                    )
                 )
-            ).count()
+            )
+            unread_count = unread_count_result.scalar()
             
             item = ConversationListItem(
                 id=conv.id,
@@ -155,20 +187,23 @@ class ChatService:
         )
 
     @staticmethod
-    def update_conversation(
-        db: Session,
+    async def update_conversation(
+        db: AsyncSession,
         conversation_id: int,
         conversation_update: ConversationUpdate,
         current_user_id: int
     ) -> Optional[ConversationResponse]:
         """Update a conversation (only for the current user)."""
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             return None
@@ -178,38 +213,41 @@ class ChatService:
         for field, value in update_data.items():
             setattr(conversation, field, value)
         
-        db.commit()
-        db.refresh(conversation)
+        await db.commit()
+        await db.refresh(conversation)
         
         return ConversationResponse.model_validate(conversation)
 
     @staticmethod
-    def delete_conversation(
-        db: Session, 
+    async def delete_conversation(
+        db: AsyncSession, 
         conversation_id: int, 
         current_user_id: int
     ) -> bool:
         """Soft delete a conversation (only for the current user)."""
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             return False
         
         # Soft delete by updating status
         conversation.status = ConversationStatus.DELETED
-        db.commit()
+        await db.commit()
         
         return True
 
     @staticmethod
-    def create_message(
-        db: Session,
+    async def create_message(
+        db: AsyncSession,
         conversation_id: int,
         message_data: MessageCreate,
         current_user_id: int,
@@ -220,13 +258,16 @@ class ChatService:
     ) -> MessageResponse:
         """Create a new message in a conversation."""
         # Verify conversation exists and belongs to user
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             raise HTTPException(
@@ -259,14 +300,14 @@ class ChatService:
         # Update conversation's updated_at timestamp
         conversation.updated_at = func.now()
         
-        db.commit()
-        db.refresh(db_message)
+        await db.commit()
+        await db.refresh(db_message)
         
         return MessageResponse.model_validate(db_message)
 
     @staticmethod
-    def get_conversation_messages(
-        db: Session,
+    async def get_conversation_messages(
+        db: AsyncSession,
         conversation_id: int,
         current_user_id: int,
         page: int = 1,
@@ -274,13 +315,16 @@ class ChatService:
     ) -> MessageListResponse:
         """Get messages for a conversation with pagination."""
         # Verify conversation exists and belongs to user
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             raise HTTPException(
@@ -288,7 +332,7 @@ class ChatService:
                 detail="Conversation not found"
             )
         
-        query = db.query(Message).filter(
+        query = select(Message).where(
             and_(
                 Message.conversation_id == conversation_id,
                 Message.status != MessageStatus.DELETED
@@ -299,11 +343,21 @@ class ChatService:
         query = query.order_by(Message.created_at.asc())
         
         # Get total count
-        total_count = query.count()
+        count_query = select(func.count()).where(
+            and_(
+                Message.conversation_id == conversation_id,
+                Message.status != MessageStatus.DELETED
+            )
+        )
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
         
         # Apply pagination
         offset = (page - 1) * page_size
-        messages = query.offset(offset).limit(page_size).all()
+        query = query.offset(offset).limit(page_size)
+        
+        result = await db.execute(query)
+        messages = result.scalars().all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
@@ -320,20 +374,23 @@ class ChatService:
         )
 
     @staticmethod
-    def update_message(
-        db: Session,
+    async def update_message(
+        db: AsyncSession,
         message_id: int,
         message_update: MessageUpdate,
         current_user_id: int
     ) -> Optional[MessageResponse]:
         """Update a message (only for the current user)."""
-        message = db.query(Message).filter(
-            and_(
-                Message.id == message_id,
-                Message.user_id == current_user_id,
-                Message.status != MessageStatus.DELETED
+        result = await db.execute(
+            select(Message).where(
+                and_(
+                    Message.id == message_id,
+                    Message.user_id == current_user_id,
+                    Message.status != MessageStatus.DELETED
+                )
             )
-        ).first()
+        )
+        message = result.scalar_one_or_none()
         
         if not message:
             return None
@@ -343,73 +400,83 @@ class ChatService:
         for field, value in update_data.items():
             setattr(message, field, value)
         
-        db.commit()
-        db.refresh(message)
+        await db.commit()
+        await db.refresh(message)
         
         return MessageResponse.model_validate(message)
 
     @staticmethod
-    def delete_message(
-        db: Session, 
+    async def delete_message(
+        db: AsyncSession, 
         message_id: int, 
         current_user_id: int
     ) -> bool:
         """Soft delete a message (only for the current user)."""
-        message = db.query(Message).filter(
-            and_(
-                Message.id == message_id,
-                Message.user_id == current_user_id,
-                Message.status != MessageStatus.DELETED
+        result = await db.execute(
+            select(Message).where(
+                and_(
+                    Message.id == message_id,
+                    Message.user_id == current_user_id,
+                    Message.status != MessageStatus.DELETED
+                )
             )
-        ).first()
+        )
+        message = result.scalar_one_or_none()
         
         if not message:
             return False
         
         # Soft delete by updating status
         message.status = MessageStatus.DELETED
-        db.commit()
+        await db.commit()
         
         return True
 
     @staticmethod
-    def mark_messages_as_read(
-        db: Session,
+    async def mark_messages_as_read(
+        db: AsyncSession,
         conversation_id: int,
         current_user_id: int
     ) -> bool:
         """Mark all AI messages in a conversation as read."""
         # Verify conversation belongs to user
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             return False
         
         # Update all unread AI messages to read
-        db.query(Message).filter(
-            and_(
-                Message.conversation_id == conversation_id,
-                Message.is_user_message == False,
-                Message.status != MessageStatus.READ,
-                Message.status != MessageStatus.DELETED
-            )
-        ).update({Message.status: MessageStatus.READ})
+        from sqlalchemy import update
+        await db.execute(
+            update(Message).where(
+                and_(
+                    Message.conversation_id == conversation_id,
+                    Message.is_user_message == False,
+                    Message.status != MessageStatus.READ,
+                    Message.status != MessageStatus.DELETED
+                )
+            ).values(status=MessageStatus.READ)
+        )
         
-        db.commit()
+        await db.commit()
         return True
 
     @staticmethod
-    def get_default_llm_model(db: Session) -> Optional[LLMModel]:
+    async def get_default_llm_model(db: AsyncSession) -> Optional[LLMModel]:
         """Get the default LLM model for AI responses."""
-        return db.query(LLMModel).filter(
-            LLMModel.is_available == True
-        ).first()
+        result = await db.execute(
+            select(LLMModel).where(LLMModel.is_available == True).limit(1)
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
     def calculate_cost(
@@ -423,15 +490,18 @@ class ChatService:
         return input_cost + output_cost
 
     @staticmethod
-    def generate_conversation_title(db: Session, conversation_id: int) -> Optional[str]:
+    async def generate_conversation_title(db: AsyncSession, conversation_id: int) -> Optional[str]:
         """Generate a title for a conversation based on the first few messages."""
-        messages = db.query(Message).filter(
-            and_(
-                Message.conversation_id == conversation_id,
-                Message.is_user_message == True,
-                Message.status != MessageStatus.DELETED
-            )
-        ).order_by(Message.created_at.asc()).limit(3).all()
+        result = await db.execute(
+            select(Message).where(
+                and_(
+                    Message.conversation_id == conversation_id,
+                    Message.is_user_message == True,
+                    Message.status != MessageStatus.DELETED
+                )
+            ).order_by(Message.created_at.asc()).limit(3)
+        )
+        messages = result.scalars().all()
         
         if not messages:
             return None
@@ -443,32 +513,38 @@ class ChatService:
         return first_message
 
     @staticmethod
-    def get_conversation_summary(
-        db: Session,
+    async def get_conversation_summary(
+        db: AsyncSession,
         conversation_id: int,
         current_user_id: int,
         max_length: int = 200
     ) -> Optional[ConversationSummaryResponse]:
         """Get a summary of a conversation."""
         # Verify conversation exists and belongs to user
-        conversation = db.query(Conversation).filter(
-            and_(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user_id,
-                Conversation.status != ConversationStatus.DELETED
+        result = await db.execute(
+            select(Conversation).where(
+                and_(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == current_user_id,
+                    Conversation.status != ConversationStatus.DELETED
+                )
             )
-        ).first()
+        )
+        conversation = result.scalar_one_or_none()
         
         if not conversation:
             return None
         
         # Get all messages
-        messages = db.query(Message).filter(
-            and_(
-                Message.conversation_id == conversation_id,
-                Message.status != MessageStatus.DELETED
-            )
-        ).order_by(Message.created_at.asc()).all()
+        result = await db.execute(
+            select(Message).where(
+                and_(
+                    Message.conversation_id == conversation_id,
+                    Message.status != MessageStatus.DELETED
+                )
+            ).order_by(Message.created_at.asc())
+        )
+        messages = result.scalars().all()
         
         if not messages:
             return ConversationSummaryResponse(
@@ -507,19 +583,19 @@ class ChatService:
                 "start": messages[0].created_at,
                 "end": messages[-1].created_at
             }
-        ) 
+        )
 
     @staticmethod
-    def get_conversations_by_date_range(
-        db: Session,
+    async def get_conversations_by_date_range(
+        db: AsyncSession,
         current_user_id: int,
         start_date: datetime,
         end_date: datetime,
         page: int = 1,
         page_size: int = 50
     ) -> ConversationListResponse:
-        """Get conversations within a specific date range."""
-        query = db.query(Conversation).filter(
+        """Get conversations by date range with pagination."""
+        query = select(Conversation).where(
             and_(
                 Conversation.user_id == current_user_id,
                 Conversation.status != ConversationStatus.DELETED,
@@ -528,37 +604,52 @@ class ChatService:
             )
         )
         
-        # Order by created_at descending (newest first)
         query = query.order_by(desc(Conversation.created_at))
         
         # Get total count
-        total_count = query.count()
-        
+        count_query = select(func.count()).where(
+            and_(
+                Conversation.user_id == current_user_id,
+                Conversation.status != ConversationStatus.DELETED,
+                Conversation.created_at >= start_date,
+                Conversation.created_at <= end_date
+            )
+        )
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
+
         # Apply pagination
         offset = (page - 1) * page_size
-        conversations = query.offset(offset).limit(page_size).all()
+        query = query.offset(offset).limit(page_size)
         
-        # Calculate total pages
+        result = await db.execute(query)
+        conversations = result.scalars().all()
+
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-        
-        # Convert to response format with message count
         conversation_items = []
+        
         for conv in conversations:
-            # Get message count for this conversation
-            message_count = db.query(func.count(Message.id)).filter(
-                and_(
-                    Message.conversation_id == conv.id,
-                    Message.status != MessageStatus.DELETED
+            # Get message count
+            message_count_result = await db.execute(
+                select(func.count(Message.id)).where(
+                    and_(
+                        Message.conversation_id == conv.id,
+                        Message.status != MessageStatus.DELETED
+                    )
                 )
-            ).scalar()
-            
-            # Get last message for preview
-            last_message = db.query(Message).filter(
-                and_(
-                    Message.conversation_id == conv.id,
-                    Message.status != MessageStatus.DELETED
-                )
-            ).order_by(desc(Message.created_at)).first()
+            )
+            message_count = message_count_result.scalar()
+
+            # Get last message
+            last_message_result = await db.execute(
+                select(Message).where(
+                    and_(
+                        Message.conversation_id == conv.id,
+                        Message.status != MessageStatus.DELETED
+                    )
+                ).order_by(desc(Message.created_at)).limit(1)
+            )
+            last_message = last_message_result.scalar_one_or_none()
             
             conversation_item = ConversationListItem(
                 id=conv.id,
@@ -581,8 +672,8 @@ class ChatService:
         )
 
     @staticmethod
-    def get_messages_by_date_range(
-        db: Session,
+    async def get_messages_by_date_range(
+        db: AsyncSession,
         current_user_id: int,
         start_date: datetime,
         end_date: datetime,
@@ -590,8 +681,8 @@ class ChatService:
         page: int = 1,
         page_size: int = 50
     ) -> MessageListResponse:
-        """Get messages within a specific date range, optionally filtered by conversation."""
-        query = db.query(Message).filter(
+        """Get messages by date range with optional conversation filter."""
+        query = select(Message).where(
             and_(
                 Message.user_id == current_user_id,
                 Message.status != MessageStatus.DELETED,
@@ -599,17 +690,19 @@ class ChatService:
                 Message.created_at <= end_date
             )
         )
-        
-        # Filter by conversation if specified
+
         if conversation_id:
             # Verify conversation belongs to user
-            conversation = db.query(Conversation).filter(
-                and_(
-                    Conversation.id == conversation_id,
-                    Conversation.user_id == current_user_id,
-                    Conversation.status != ConversationStatus.DELETED
+            conv_result = await db.execute(
+                select(Conversation).where(
+                    and_(
+                        Conversation.id == conversation_id,
+                        Conversation.user_id == current_user_id,
+                        Conversation.status != ConversationStatus.DELETED
+                    )
                 )
-            ).first()
+            )
+            conversation = conv_result.scalar_one_or_none()
             
             if not conversation:
                 raise HTTPException(
@@ -617,22 +710,34 @@ class ChatService:
                     detail="Conversation not found"
                 )
             
-            query = query.filter(Message.conversation_id == conversation_id)
+            query = query.where(Message.conversation_id == conversation_id)
         
-        # Order by created_at descending (newest first)
         query = query.order_by(desc(Message.created_at))
         
         # Get total count
-        total_count = query.count()
+        count_query = select(func.count()).where(
+            and_(
+                Message.user_id == current_user_id,
+                Message.status != MessageStatus.DELETED,
+                Message.created_at >= start_date,
+                Message.created_at <= end_date
+            )
+        )
+        if conversation_id:
+            count_query = count_query.where(Message.conversation_id == conversation_id)
+            
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
         
         # Apply pagination
         offset = (page - 1) * page_size
-        messages = query.offset(offset).limit(page_size).all()
+        query = query.offset(offset).limit(page_size)
         
-        # Calculate total pages
+        result = await db.execute(query)
+        messages = result.scalars().all()
+        
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Convert to response format
         message_items = [MessageResponse.model_validate(message) for message in messages]
         
         return MessageListResponse(
@@ -641,4 +746,4 @@ class ChatService:
             page=page,
             page_size=page_size,
             total_pages=total_pages
-        ) 
+        )

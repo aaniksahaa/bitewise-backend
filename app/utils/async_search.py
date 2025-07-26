@@ -1,29 +1,17 @@
 """
-Search utilities for fuzzy matching and scoring of dish names.
-
-DEPRECATED: This module contains synchronous database code.
-Please use async_search.py instead for all new code.
+Async search utilities for fuzzy matching and scoring of dish names.
 """
 import re
-import logging
 from typing import List, Tuple, Dict, Any
 from fuzzywuzzy import fuzz, process
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.dish import Dish
 
-logger = logging.getLogger(__name__)
 
-# Issue a deprecation warning
-logger.warning(
-    "DEPRECATED: Using synchronous search utilities. "
-    "Please migrate to async_search.py for better performance."
-)
-
-
-class SearchUtils:
-    """Utility class for intelligent dish searching with fuzzy matching and scoring."""
+class AsyncSearchUtils:
+    """Async utility class for intelligent dish searching with fuzzy matching and scoring."""
     
     @staticmethod
     def normalize_text(text: str) -> str:
@@ -74,13 +62,13 @@ class SearchUtils:
             return 0.0
         
         # Normalize inputs
-        search_norm = SearchUtils.normalize_text(search_term)
-        name_norm = SearchUtils.normalize_text(dish_name)
-        desc_norm = SearchUtils.normalize_text(dish_description or "")
-        cuisine_norm = SearchUtils.normalize_text(dish_cuisine or "")
+        search_norm = AsyncSearchUtils.normalize_text(search_term)
+        name_norm = AsyncSearchUtils.normalize_text(dish_name)
+        desc_norm = AsyncSearchUtils.normalize_text(dish_description or "")
+        cuisine_norm = AsyncSearchUtils.normalize_text(dish_cuisine or "")
         
         # Extract words from search term
-        search_words = SearchUtils.extract_words(search_norm)
+        search_words = AsyncSearchUtils.extract_words(search_norm)
         if not search_words:
             # If no meaningful words, fall back to simple fuzzy matching
             return fuzz.partial_ratio(search_norm, name_norm)
@@ -97,7 +85,7 @@ class SearchUtils:
         
         # 2. Word-level matching - 25% weight
         word_match_score = 0.0
-        name_words = SearchUtils.extract_words(name_norm)
+        name_words = AsyncSearchUtils.extract_words(name_norm)
         
         for search_word in search_words:
             best_word_match = 0.0
@@ -139,18 +127,18 @@ class SearchUtils:
         return min(total_score, 100.0)  # Cap at 100
     
     @staticmethod
-    def search_dishes_with_scoring(
-        db: Session, 
+    async def search_dishes_with_scoring_async(
+        db: AsyncSession, 
         search_term: str, 
         page: int = 1, 
         page_size: int = 20,
         min_score_threshold: float = 10.0  # Minimum score to include in results
     ) -> Tuple[List[Tuple[Dish, float]], int]:
         """
-        Search dishes with fuzzy matching and return scored results.
+        Search dishes with fuzzy matching and return scored results asynchronously.
         
         Args:
-            db: Database session
+            db: Async database session
             search_term: Search query
             page: Page number for pagination
             page_size: Number of results per page
@@ -162,13 +150,14 @@ class SearchUtils:
         if not search_term or not search_term.strip():
             return [], 0
         
-        # Get all dishes from database
-        all_dishes = db.query(Dish).all()
+        # Get all dishes from database asynchronously
+        result = await db.execute(select(Dish))
+        all_dishes = result.scalars().all()
         
         # Calculate scores for all dishes
         scored_dishes = []
         for dish in all_dishes:
-            score = SearchUtils.calculate_match_score(
+            score = AsyncSearchUtils.calculate_match_score(
                 search_term=search_term,
                 dish_name=dish.name,
                 dish_description=dish.description,
@@ -192,12 +181,12 @@ class SearchUtils:
         return paginated_results, total_count
     
     @staticmethod
-    def find_best_dish_by_name(db: Session, dish_name: str) -> Tuple[Dish, float]:
+    async def find_best_dish_by_name_async(db: AsyncSession, dish_name: str) -> Tuple[Dish, float]:
         """
-        Find the best matching dish by name for intake logging.
+        Find the best matching dish by name for intake logging asynchronously.
         
         Args:
-            db: Database session
+            db: Async database session
             dish_name: Name to search for
             
         Returns:
@@ -206,14 +195,15 @@ class SearchUtils:
         if not dish_name or not dish_name.strip():
             return None, 0.0
         
-        # Get all dishes and score them
-        all_dishes = db.query(Dish).all()
+        # Get all dishes and score them asynchronously
+        result = await db.execute(select(Dish))
+        all_dishes = result.scalars().all()
         
         best_dish = None
         best_score = 0.0
         
         for dish in all_dishes:
-            score = SearchUtils.calculate_match_score(
+            score = AsyncSearchUtils.calculate_match_score(
                 search_term=dish_name,
                 dish_name=dish.name,
                 dish_description=dish.description,
@@ -228,4 +218,4 @@ class SearchUtils:
         if best_score >= 30.0:
             return best_dish, best_score
         
-        return None, 0.0 
+        return None, 0.0

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
-from app.db.session import get_db
-from app.services.auth import get_current_active_user
-from app.services.dish import DishService
+from app.db.async_session import get_async_db
+from app.services.async_auth import get_current_active_user_async
+from app.services.async_dish import AsyncDishService
 from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListResponse
 from app.models.user import User
 
@@ -13,15 +13,15 @@ router = APIRouter()
 
 # Create a function to optionally get current user
 async def get_current_user_optional(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: Optional[str] = None
 ) -> Optional[User]:
     """Get current user if authenticated, otherwise return None."""
     if not token:
         return None
     try:
-        from app.services.auth import AuthService
-        return AuthService.get_current_user(db=db, token=token)
+        from app.services.async_auth import AsyncAuthService
+        return await AsyncAuthService.get_current_user(db=db, token=token)
     except:
         return None
 
@@ -29,11 +29,11 @@ async def get_current_user_optional(
 @router.post("/", response_model=DishResponse, status_code=status.HTTP_201_CREATED)
 async def create_dish(
     dish_data: DishCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Create a new dish."""
-    return DishService.create_dish(
+    return await AsyncDishService.create_dish(
         db=db, 
         dish_data=dish_data, 
         current_user_id=current_user.id
@@ -45,10 +45,10 @@ async def search_dishes_by_name(
     q: str = Query(..., description="Search term for dish name"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Search dishes by name using substring matching."""
-    return DishService.search_dishes_by_name(
+    return await AsyncDishService.search_dishes_by_name(
         db=db,
         search_term=q,
         page=page,
@@ -63,7 +63,7 @@ async def get_dishes(
     my_dishes: bool = Query(False, description="Get only dishes created by current user"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get dishes with optional search and filtering."""
     # For my_dishes, require authentication
@@ -74,7 +74,7 @@ async def get_dishes(
             detail="Authentication required to view your dishes. Use /dishes/my endpoint instead."
         )
     
-    return DishService.get_dishes(
+    return await AsyncDishService.get_dishes(
         db=db,
         search=search,
         cuisine=cuisine,
@@ -89,10 +89,10 @@ async def get_dishes_by_cuisine(
     cuisine: str,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get dishes filtered by cuisine."""
-    return DishService.get_dishes_by_cuisine(
+    return await AsyncDishService.get_dishes_by_cuisine(
         db=db,
         cuisine=cuisine,
         page=page,
@@ -104,11 +104,11 @@ async def get_dishes_by_cuisine(
 async def get_my_dishes(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get dishes created by the current user."""
-    return DishService.get_user_dishes(
+    return await AsyncDishService.get_user_dishes(
         db=db,
         user_id=current_user.id,
         page=page,
@@ -119,10 +119,10 @@ async def get_my_dishes(
 @router.get("/{dish_id}", response_model=DishResponse)
 async def get_dish(
     dish_id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get a specific dish by ID."""
-    dish = DishService.get_dish_by_id(db=db, dish_id=dish_id)
+    dish = await AsyncDishService.get_dish_by_id(db=db, dish_id=dish_id)
     if not dish:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -135,11 +135,11 @@ async def get_dish(
 async def update_dish(
     dish_id: int,
     dish_update: DishUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Update a dish."""
-    dish = DishService.update_dish(
+    dish = await AsyncDishService.update_dish(
         db=db,
         dish_id=dish_id,
         dish_update=dish_update,
@@ -156,11 +156,11 @@ async def update_dish(
 @router.delete("/{dish_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dish(
     dish_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Delete a dish."""
-    success = DishService.delete_dish(
+    success = await AsyncDishService.delete_dish(
         db=db,
         dish_id=dish_id,
         current_user_id=current_user.id

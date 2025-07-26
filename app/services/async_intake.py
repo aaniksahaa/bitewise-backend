@@ -1,7 +1,16 @@
-from typing import Optional, List
-from datetime import datetime, date
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, func, cast, DateTime
+"""
+Async intake service for managing food intake records.
+
+This service provides async database operations for creating, retrieving,
+updating, and deleting intake records, as well as calculating nutritional
+summaries and statistics.
+"""
+
+from typing import Optional, List, Tuple
+from datetime import datetime, date, timezone, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, func, cast, DateTime, update, delete
+from sqlalchemy.orm import selectinload, joinedload
 from fastapi import HTTPException, status
 import math
 from decimal import Decimal
@@ -18,17 +27,24 @@ from app.schemas.intake import (
     DishDetail,
     NutritionalSummary
 )
-from app.utils.search import SearchUtils
+from app.services.base import AsyncBaseService
 from app.utils.logger import intake_logger
 
 
-class IntakeService:
+class AsyncIntakeService(AsyncBaseService[Intake, IntakeCreate, IntakeUpdate]):
+    """
+    Async service for managing intake records with comprehensive CRUD operations,
+    nutritional calculations, and period-based queries.
+    """
+    
+    def __init__(self):
+        super().__init__(Intake)
+    
     @staticmethod
     def _create_intake_response(intake: Intake) -> IntakeResponse:
         """Helper method to create IntakeResponse with dish details."""
         dish_detail = DishDetail.model_validate(intake.dish)
         
-        # Create the response manually to include dish details
         return IntakeResponse(
             id=intake.id,
             user_id=intake.user_id,
@@ -98,15 +114,17 @@ class IntakeService:
             total_water_ml=total_water_ml
         )
 
-    @staticmethod
-    def create_intake(db: Session, intake_data: IntakeCreate, current_user_id: int) -> IntakeResponse:
+    async def create_intake(self, db: AsyncSession, intake_data: IntakeCreate, current_user_id: int) -> IntakeResponse:
         """Create a new intake record with detailed logging"""
         intake_logger.info(f"Creating intake for user {current_user_id}", "CREATE",
                          dish_id=intake_data.dish_id, portion_size=intake_data.portion_size)
         
         try:
             # Verify dish exists
-            dish = db.query(Dish).filter(Dish.id == intake_data.dish_id).first()
+            stmt = select(Dish).where(Dish.id == intake_data.dish_id)
+            result = await db.execute(stmt)
+            dish = result.scalar_one_or_none()
+            
             if not dish:
                 error_msg = f"Dish with ID {intake_data.dish_id} not found"
                 intake_logger.error(error_msg, "CREATE", dish_id=intake_data.dish_id)
@@ -130,10 +148,15 @@ class IntakeService:
             db.add(db_intake)
             
             intake_logger.debug("Committing intake to database", "CREATE")
-            db.commit()
+            await db.commit()
             
             intake_logger.debug("Refreshing intake from database", "CREATE")
-            db.refresh(db_intake)
+            await db.refresh(db_intake)
+            
+            # Load the dish relationship for response
+            stmt_with_dish = select(Intake).options(selectinload(Intake.dish)).where(Intake.id == db_intake.id)
+            result = await db.execute(stmt_with_dish)
+            db_intake = result.scalar_one()
             
             # Verify the intake was saved
             if db_intake.id:
@@ -141,29 +164,19 @@ class IntakeService:
                 intake_logger.success(f"✅ Intake created successfully", "CREATE",
                                     intake_id=db_intake.id, dish_name=dish.name, 
                                     user_id=current_user_id, calories=calories)
-                
-                # Double-check by querying it back
-                verification = db.query(Intake).filter(Intake.id == db_intake.id).first()
-                if verification:
-                    intake_logger.success("✓ Intake verified in database", "CREATE",
-                                        intake_id=db_intake.id)
-                else:
-                    intake_logger.error("✗ CRITICAL: Intake not found after commit!", "CREATE",
-                                      intake_id=db_intake.id)
             else:
                 intake_logger.error("✗ CRITICAL: Intake created but has no ID!", "CREATE")
             
-            return IntakeService._create_intake_response(db_intake)
+            return self._create_intake_response(db_intake)
             
         except Exception as e:
             intake_logger.error(f"Failed to create intake: {str(e)}", "CREATE",
                               user_id=current_user_id, dish_id=intake_data.dish_id,
                               error=str(e))
-            db.rollback()
+            await db.rollback()
             raise
 
-    @staticmethod
-    def create_intake_by_name(db: Session, intake_data: IntakeCreateByName, current_user_id: int) -> IntakeResponse:
+    async def create_intake_by_name(self, db: AsyncSession, intake_data: IntakeCreateByName, current_user_id: int) -> IntakeResponse:
         """Create a new intake record by dish name with detailed logging"""
         
         # Start intake process with clear banner
@@ -176,16 +189,20 @@ class IntakeService:
             intake_logger.separator("┈", 25, "SEARCH")
             intake_logger.debug(f"Searching for dish: '{intake_data.dish_name}'", "SEARCH")
             
-            dish = db.query(Dish).filter(
+            stmt = select(Dish).where(
                 func.lower(Dish.name) == func.lower(intake_data.dish_name.strip())
-            ).first()
+            )
+            result = await db.execute(stmt)
+            dish = result.scalar_one_or_none()
             
             if not dish:
                 # Try partial match if exact match fails
                 intake_logger.debug(f"Exact match failed, trying partial match", "SEARCH")
-                dish = db.query(Dish).filter(
+                stmt = select(Dish).where(
                     Dish.name.ilike(f"%{intake_data.dish_name.strip()}%")
-                ).first()
+                )
+                result = await db.execute(stmt)
+                dish = result.scalar_one_or_none()
             
             if not dish:
                 error_msg = f"Dish '{intake_data.dish_name}' not found in database"
@@ -208,7 +225,7 @@ class IntakeService:
             intake_logger.debug("Converting to IntakeCreate and calling create_intake", "DATABASE")
             
             # Use the regular create_intake method
-            result = IntakeService.create_intake(db, intake_create, current_user_id)
+            result = await self.create_intake(db, intake_create, current_user_id)
             
             intake_logger.success(f"✅ Intake by name completed", "PROCESS",
                                 intake_id=result.id, dish_name=dish.name)
@@ -223,50 +240,63 @@ class IntakeService:
             intake_logger.section_end("Intake Logging", "PROCESS", success=False)
             raise
 
-    @staticmethod
-    def get_intake_by_id(db: Session, intake_id: int, current_user_id: int) -> Optional[IntakeResponse]:
+    async def get_intake_by_id(self, db: AsyncSession, intake_id: int, current_user_id: int) -> Optional[IntakeResponse]:
         """Get an intake by its ID (only for the current user)."""
-        intake = db.query(Intake).options(joinedload(Intake.dish)).filter(
-            and_(
-                Intake.id == intake_id,
-                Intake.user_id == current_user_id
+        stmt = (
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(
+                and_(
+                    Intake.id == intake_id,
+                    Intake.user_id == current_user_id
+                )
             )
-        ).first()
+        )
+        result = await db.execute(stmt)
+        intake = result.scalar_one_or_none()
         
         if not intake:
             return None
         
-        return IntakeService._create_intake_response(intake)
+        return self._create_intake_response(intake)
 
-    @staticmethod
-    def get_user_intakes(
-        db: Session, 
+    async def get_user_intakes(
+        self, 
+        db: AsyncSession, 
         current_user_id: int,
         page: int = 1, 
         page_size: int = 20
     ) -> IntakeListResponse:
         """Get all intakes for the current user with pagination."""
         intake_logger.info(f"Getting all intakes for user {current_user_id}", "GET", page=page, page_size=page_size)
-        query = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.user_id == current_user_id)
         
-        # Order by intake_time descending (most recent first)
-        query = query.order_by(Intake.intake_time.desc())
+        # Base query with dish relationship
+        base_stmt = (
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(Intake.user_id == current_user_id)
+            .order_by(Intake.intake_time.desc())
+        )
         
         # Get total count
-        total_count = query.count()
+        count_stmt = select(func.count(Intake.id)).where(Intake.user_id == current_user_id)
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar()
         
         # Apply pagination
         offset = (page - 1) * page_size
-        intakes = query.offset(offset).limit(page_size).all()
+        paginated_stmt = base_stmt.offset(offset).limit(page_size)
+        result = await db.execute(paginated_stmt)
+        intakes = result.scalars().all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
         # Convert to response format with dish details
-        intake_items = [IntakeService._create_intake_list_item(intake) for intake in intakes]
+        intake_items = [self._create_intake_list_item(intake) for intake in intakes]
         
         # Calculate nutritional summary for the current page
-        nutritional_summary = IntakeService._calculate_nutritional_summary(intakes)
+        nutritional_summary = self._calculate_nutritional_summary(intakes)
         
         return IntakeListResponse(
             intakes=intake_items,
@@ -277,9 +307,9 @@ class IntakeService:
             nutritional_summary=nutritional_summary
         )
 
-    @staticmethod
-    def get_intakes_by_period(
-        db: Session,
+    async def get_intakes_by_period(
+        self,
+        db: AsyncSession,
         current_user_id: int,
         start_time: datetime,
         end_time: datetime,
@@ -294,32 +324,48 @@ class IntakeService:
                 detail="Start time must be before end time"
             )
         
-        query = db.query(Intake).options(joinedload(Intake.dish)).filter(
-            and_(
-                Intake.user_id == current_user_id,
-                cast(Intake.intake_time, DateTime) >= start_time,
-                cast(Intake.intake_time, DateTime) <= end_time
+        # Base query with filters
+        base_stmt = (
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(
+                and_(
+                    Intake.user_id == current_user_id,
+                    cast(Intake.intake_time, DateTime) >= start_time,
+                    cast(Intake.intake_time, DateTime) <= end_time
+                )
+            )
+            .order_by(Intake.intake_time.asc())
+        )
+        
+        # Get total count for the period
+        count_stmt = (
+            select(func.count(Intake.id))
+            .where(
+                and_(
+                    Intake.user_id == current_user_id,
+                    cast(Intake.intake_time, DateTime) >= start_time,
+                    cast(Intake.intake_time, DateTime) <= end_time
+                )
             )
         )
-        print(current_user_id)
-        # Order by intake_time ascending for period queries
-        query = query.order_by(Intake.intake_time.asc())
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar()
         
-        # Get total count
-        total_count = query.count()
-        # print(total_count)
         # Apply pagination
         offset = (page - 1) * page_size
-        intakes = query.offset(offset).limit(page_size).all()
+        paginated_stmt = base_stmt.offset(offset).limit(page_size)
+        result = await db.execute(paginated_stmt)
+        intakes = result.scalars().all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
         # Convert to response format with dish details
-        intake_items = [IntakeService._create_intake_list_item(intake) for intake in intakes]
+        intake_items = [self._create_intake_list_item(intake) for intake in intakes]
         
         # Calculate nutritional summary for the current page
-        nutritional_summary = IntakeService._calculate_nutritional_summary(intakes)
+        nutritional_summary = self._calculate_nutritional_summary(intakes)
         
         return IntakeListResponse(
             intakes=intake_items,
@@ -330,20 +376,23 @@ class IntakeService:
             nutritional_summary=nutritional_summary
         )
 
-    @staticmethod
-    def update_intake(
-        db: Session, 
+    async def update_intake(
+        self,
+        db: AsyncSession, 
         intake_id: int, 
         intake_update: IntakeUpdate, 
         current_user_id: int
     ) -> Optional[IntakeResponse]:
         """Update an existing intake (only for the current user)."""
-        intake = db.query(Intake).filter(
+        # Get the existing intake
+        stmt = select(Intake).where(
             and_(
                 Intake.id == intake_id,
                 Intake.user_id == current_user_id
             )
-        ).first()
+        )
+        result = await db.execute(stmt)
+        intake = result.scalar_one_or_none()
         
         if not intake:
             return None
@@ -351,7 +400,9 @@ class IntakeService:
         # If updating dish_id, verify the new dish exists
         update_data = intake_update.model_dump(exclude_unset=True)
         if "dish_id" in update_data:
-            dish = db.query(Dish).filter(Dish.id == update_data["dish_id"]).first()
+            dish_stmt = select(Dish).where(Dish.id == update_data["dish_id"])
+            dish_result = await db.execute(dish_stmt)
+            dish = dish_result.scalar_one_or_none()
             if not dish:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -362,36 +413,41 @@ class IntakeService:
         for field, value in update_data.items():
             setattr(intake, field, value)
         
-        db.commit()
-        db.refresh(intake)
+        await db.commit()
+        await db.refresh(intake)
         
         # Load the dish relationship and return response with dish details
-        intake_with_dish = db.query(Intake).options(joinedload(Intake.dish)).filter(Intake.id == intake.id).first()
-        return IntakeService._create_intake_response(intake_with_dish)
+        stmt_with_dish = (
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(Intake.id == intake.id)
+        )
+        result = await db.execute(stmt_with_dish)
+        intake_with_dish = result.scalar_one()
+        
+        return self._create_intake_response(intake_with_dish)
 
-    @staticmethod
-    def delete_intake(db: Session, intake_id: int, current_user_id: int) -> bool:
+    async def delete_intake(self, db: AsyncSession, intake_id: int, current_user_id: int) -> bool:
         """Delete an intake (only for the current user)."""
-        intake = db.query(Intake).filter(
+        stmt = select(Intake).where(
             and_(
                 Intake.id == intake_id,
                 Intake.user_id == current_user_id
             )
-        ).first()
+        )
+        result = await db.execute(stmt)
+        intake = result.scalar_one_or_none()
         
         if not intake:
             return False
         
-        db.delete(intake)
-        db.commit()
+        await db.delete(intake)
+        await db.commit()
         
         return True
 
-    @staticmethod
-    def get_today_intakes(db: Session, current_user_id: int) -> IntakeListResponse:
+    async def get_today_intakes(self, db: AsyncSession, current_user_id: int) -> IntakeListResponse:
         """Get all intakes from the last 24 hours for the current user."""
-        from datetime import datetime, timezone, timedelta
-        
         # Get current UTC time
         now_utc = datetime.now(timezone.utc)
         
@@ -409,9 +465,7 @@ class IntakeService:
         start_time_naive = twenty_four_hours_ago_dhaka.replace(tzinfo=None)
         end_time_naive = now_dhaka.replace(tzinfo=None)
         
-        print(now_dhaka)
-        
-        return IntakeService.get_intakes_by_period(
+        return await self.get_intakes_by_period(
             db=db,
             current_user_id=current_user_id,
             start_time=start_time_naive,
@@ -420,42 +474,46 @@ class IntakeService:
             page_size=100  # Get all intakes from last 24 hours without pagination
         )
 
-    @staticmethod
-    def get_calendar_day_intakes(db: Session, current_user_id: int) -> IntakeListResponse:
+    async def get_calendar_day_intakes(self, db: AsyncSession, current_user_id: int) -> IntakeListResponse:
         """Get all intakes for the current calendar day (00:00 to 23:59 today) for the current user."""
-        from datetime import date, time, datetime
+        from datetime import time
         
         # Get today's start and end
         today = date.today()
         start_of_day = datetime.combine(today, time.min)
         end_of_day = datetime.combine(today, time.max)
         
-        return IntakeService.get_intakes_by_period(
+        return await self.get_intakes_by_period(
             db=db,
             current_user_id=current_user_id,
             start_time=start_of_day,
             end_time=end_of_day,
             page=1,
             page_size=100  # Get all today's calendar day intakes without pagination
-        ) 
+        )
 
-    @staticmethod
-    def get_daily_nutrition_summary(db: Session, user_id: int, target_date: date) -> dict:
+    async def get_daily_nutrition_summary(self, db: AsyncSession, user_id: int, target_date: date) -> dict:
         """Get daily nutrition summary for a user with logging"""
         intake_logger.debug(f"Calculating daily nutrition for user {user_id} on {target_date}", "SUMMARY")
         
         try:
             # Get all intakes for the specified date
-            start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=datetime.timezone.utc)
-            end_datetime = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=datetime.timezone.utc)
+            start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+            end_datetime = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=timezone.utc)
             
-            intakes = db.query(Intake).filter(
-                and_(
-                    Intake.user_id == user_id,
-                    cast(Intake.intake_time, DateTime) >= start_datetime,
-                    cast(Intake.intake_time, DateTime) <= end_datetime
+            stmt = (
+                select(Intake)
+                .options(selectinload(Intake.dish))
+                .where(
+                    and_(
+                        Intake.user_id == user_id,
+                        cast(Intake.intake_time, DateTime) >= start_datetime,
+                        cast(Intake.intake_time, DateTime) <= end_datetime
+                    )
                 )
-            ).all()
+            )
+            result = await db.execute(stmt)
+            intakes = result.scalars().all()
             
             intake_logger.debug(f"Found {len(intakes)} intakes for summary", "SUMMARY", count=len(intakes))
             
@@ -506,10 +564,15 @@ class IntakeService:
                               user_id=user_id, date=target_date, error=str(e))
             raise
 
+
+# Create a singleton instance for use in endpoints
+async_intake_service = AsyncIntakeService()
+
+
 # Legacy function for backward compatibility
-def log_intake(db: Session, user_id: int, dish_id: int, quantity: float) -> dict:
+async def log_intake_async(db: AsyncSession, user_id: int, dish_id: int, quantity: float) -> dict:
     """Legacy function for logging intake - maintained for backward compatibility"""
-    intake_logger.info(f"Legacy log_intake called", "LEGACY",
+    intake_logger.info(f"Legacy log_intake_async called", "LEGACY",
                      user_id=user_id, dish_id=dish_id, quantity=quantity)
     
     try:
@@ -521,7 +584,7 @@ def log_intake(db: Session, user_id: int, dish_id: int, quantity: float) -> dict
             water_ml=None
         )
         
-        result = IntakeService.create_intake(db, intake_data, user_id)
+        result = await async_intake_service.create_intake(db, intake_data, user_id)
         
         intake_logger.success(f"Legacy intake logged successfully", "LEGACY",
                             intake_id=result.id)
@@ -538,4 +601,4 @@ def log_intake(db: Session, user_id: int, dish_id: int, quantity: float) -> dict
         return {
             "success": False,
             "error": str(e)
-        } 
+        }

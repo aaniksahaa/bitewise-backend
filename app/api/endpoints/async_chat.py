@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Form, File, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from decimal import Decimal
@@ -9,16 +9,16 @@ import os
 from pydantic import BaseModel
 import base64
 
-from app.db.session import get_db
-from app.services.auth import get_current_active_user
+from app.db.async_session import get_async_db
+from app.services.async_auth import get_current_active_user_async
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message as MessageModel
 from app.models.dish import Dish
-from app.services.chat import ChatService
+from app.services.async_chat import AsyncChatService
 from app.services.agent import AgentService
 from app.services.supabase_storage import SupabaseStorageService
-from app.services.intake import IntakeService
+from app.services.async_intake import AsyncIntakeService
 from app.schemas.chat import (
     ConversationCreate,
     ConversationUpdate,
@@ -58,33 +58,32 @@ class DishConfirmationRequest(BaseModel):
 @router.post("/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     conversation_data: ConversationCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Create a new conversation."""
-    return ChatService.create_conversation(
+    return await AsyncChatService.create_conversation(
         db=db,
         conversation_data=conversation_data,
         current_user_id=current_user.id
     )
 
+
 @router.get("/conversations/by-date-range", response_model=ConversationListResponse)
 async def get_conversations_by_date_range(
-    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
-    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=100, description="Number of conversations per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
-    """Get conversations filtered by date range."""
     try:
-        # Parse dates
         from datetime import datetime
         start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
         end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
         
-        return ChatService.get_conversations_by_date_range(
+        return await AsyncChatService.get_conversations_by_date_range(
             db=db,
             current_user_id=current_user.id,
             start_date=start_datetime,
@@ -103,11 +102,11 @@ async def get_conversations(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status_filter: Optional[ConversationStatus] = Query(None, description="Filter by conversation status"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get all conversations for the current user with pagination."""
-    return ChatService.get_user_conversations(
+    return await AsyncChatService.get_user_conversations(
         db=db,
         current_user_id=current_user.id,
         page=page,
@@ -118,11 +117,11 @@ async def get_conversations(
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(
     conversation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get a specific conversation by ID."""
-    conversation = ChatService.get_conversation_by_id(
+    conversation = await AsyncChatService.get_conversation_by_id(
         db=db,
         conversation_id=conversation_id,
         current_user_id=current_user.id
@@ -138,11 +137,11 @@ async def get_conversation(
 async def update_conversation(
     conversation_id: int,
     conversation_update: ConversationUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Update a conversation."""
-    conversation = ChatService.update_conversation(
+    conversation = await AsyncChatService.update_conversation(
         db=db,
         conversation_id=conversation_id,
         conversation_update=conversation_update,
@@ -158,11 +157,11 @@ async def update_conversation(
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Delete (archive) a conversation."""
-    success = ChatService.delete_conversation(
+    success = await AsyncChatService.delete_conversation(
         db=db,
         conversation_id=conversation_id,
         current_user_id=current_user.id
@@ -179,11 +178,11 @@ async def get_conversation_messages(
     conversation_id: int,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get messages for a conversation with pagination."""
-    return ChatService.get_conversation_messages(
+    return await AsyncChatService.get_conversation_messages(
         db=db,
         conversation_id=conversation_id,
         current_user_id=current_user.id,
@@ -195,11 +194,11 @@ async def get_conversation_messages(
 async def create_message(
     conversation_id: int,
     message_data: MessageCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Create a new message in a conversation (user message only)."""
-    return ChatService.create_message(
+    return await AsyncChatService.create_message(
         db=db,
         conversation_id=conversation_id,
         message_data=message_data,
@@ -207,24 +206,23 @@ async def create_message(
         is_user_message=True
     )
 
+
 @router.get("/messages/by-date-range", response_model=MessageListResponse)
 async def get_messages_by_date_range(
-    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
-    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
-    conversation_id: Optional[int] = Query(None, description="Filter by specific conversation ID"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=100, description="Number of messages per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    conversation_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
-    """Get messages filtered by date range, optionally for a specific conversation."""
     try:
-        # Parse dates
         from datetime import datetime
         start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
         end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
         
-        return ChatService.get_messages_by_date_range(
+        return await AsyncChatService.get_messages_by_date_range(
             db=db,
             current_user_id=current_user.id,
             start_date=start_datetime,
@@ -243,11 +241,11 @@ async def get_messages_by_date_range(
 async def update_message(
     message_id: int,
     message_update: MessageUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Update a message."""
-    message = ChatService.update_message(
+    message = await AsyncChatService.update_message(
         db=db,
         message_id=message_id,
         message_update=message_update,
@@ -263,11 +261,11 @@ async def update_message(
 @router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_message(
     message_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Delete a message."""
-    success = ChatService.delete_message(
+    success = await AsyncChatService.delete_message(
         db=db,
         message_id=message_id,
         current_user_id=current_user.id
@@ -282,8 +280,8 @@ async def delete_message(
 @router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)
 async def send_chat_message(
     chat_request: ChatRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Send a message and get AI response. Creates a new conversation if none specified."""
     
@@ -304,7 +302,7 @@ async def send_chat_message(
             api_logger.separator("┈", 40, "SETUP")
             api_logger.debug("Creating new conversation", "SETUP")
             from app.schemas.chat import ConversationCreate
-            conversation = ChatService.create_conversation(
+            conversation = await AsyncChatService.create_conversation(
                 db=db,
                 conversation_data=ConversationCreate(),
                 current_user_id=current_user.id
@@ -322,7 +320,7 @@ async def send_chat_message(
             extra_data=chat_request.context
         )
         
-        user_message = ChatService.create_message(
+        user_message = await AsyncChatService.create_message(
             db=db,
             conversation_id=conversation_id,
             message_data=user_message_data,
@@ -381,7 +379,7 @@ async def send_chat_message(
             extra_data={"generated": True}
         )
         
-        ai_message = ChatService.create_message(
+        ai_message = await AsyncChatService.create_message(
             db=db,
             conversation_id=conversation_id,
             message_data=ai_message_data,
@@ -405,7 +403,7 @@ async def send_chat_message(
             api_logger.debug(f"Cost calculated: ${cost_estimate:.6f}", "STORAGE", cost=cost_estimate)
         
         # Auto-generate conversation title if it's the first exchange
-        conversation = ChatService.get_conversation_by_id(
+        conversation = await AsyncChatService.get_conversation_by_id(
             db=db,
             conversation_id=conversation_id,
             current_user_id=current_user.id
@@ -413,10 +411,10 @@ async def send_chat_message(
         
         if conversation and not conversation.title:
             api_logger.debug("Generating conversation title", "SETUP")
-            title = ChatService.generate_conversation_title(db, conversation_id)
+            title = await AsyncChatService.generate_conversation_title(db, conversation_id)
             if title:
                 from app.schemas.chat import ConversationUpdate
-                ChatService.update_conversation(
+                await AsyncChatService.update_conversation(
                     db=db,
                     conversation_id=conversation_id,
                     conversation_update=ConversationUpdate(title=title),
@@ -471,11 +469,11 @@ async def send_chat_message(
 @router.post("/conversations/{conversation_id}/mark-read", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_messages_as_read(
     conversation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Mark all AI messages in a conversation as read."""
-    success = ChatService.mark_messages_as_read(
+    success = await AsyncChatService.mark_messages_as_read(
         db=db,
         conversation_id=conversation_id,
         current_user_id=current_user.id
@@ -490,11 +488,11 @@ async def mark_messages_as_read(
 async def get_conversation_summary(
     conversation_id: int,
     summary_request: ConversationSummaryRequest = Depends(),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get a summary of a conversation."""
-    summary = ChatService.get_conversation_summary(
+    summary = await AsyncChatService.get_conversation_summary(
         db=db,
         conversation_id=conversation_id,
         current_user_id=current_user.id,
@@ -511,8 +509,8 @@ async def get_conversation_summary(
 @router.post("/upload-image", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_image(
     image: UploadFile = File(..., description="Image file to upload"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Upload an image to Supabase Storage."""
     try:
@@ -543,8 +541,8 @@ async def send_chat_message_with_images(
     message: str = Form(..., description="Chat message"),
     conversation_id: Optional[int] = Form(None, description="Existing conversation ID"),
     images: List[UploadFile] = File(default=[], description="Images to upload with the message"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Send a chat message with image uploads."""
     # Handle the case where FastAPI passes invalid data for empty file uploads
@@ -623,7 +621,7 @@ async def send_chat_message_with_images(
     # Create conversation if not provided
     if not conversation_id:
         from app.schemas.chat import ConversationCreate
-        conversation = ChatService.create_conversation(
+        conversation = await AsyncChatService.create_conversation(
             db=db,
             conversation_data=ConversationCreate(),
             current_user_id=current_user.id
@@ -641,7 +639,7 @@ async def send_chat_message_with_images(
         extra_data={"has_images": len(uploaded_images) > 0, "image_count": len(uploaded_images)}
     )
     
-    user_message = ChatService.create_message(
+    user_message = await AsyncChatService.create_message(
         db=db,
         conversation_id=conversation_id,
         message_data=user_message_data,
@@ -676,7 +674,7 @@ async def send_chat_message_with_images(
         extra_data={"generated": True, "processed_images": len(uploaded_images) > 0}
     )
     
-    ai_message = ChatService.create_message(
+    ai_message = await AsyncChatService.create_message(
         db=db,
         conversation_id=conversation_id,
         message_data=ai_message_data,
@@ -697,17 +695,17 @@ async def send_chat_message_with_images(
         )
     
     # Auto-generate conversation title if it's the first exchange
-    conversation = ChatService.get_conversation_by_id(
+    conversation = await AsyncChatService.get_conversation_by_id(
         db=db,
         conversation_id=conversation_id,
         current_user_id=current_user.id
     )
     
     if conversation and not conversation.title:
-        title = ChatService.generate_conversation_title(db, conversation_id)
+        title = await AsyncChatService.generate_conversation_title(db, conversation_id)
         if title:
             from app.schemas.chat import ConversationUpdate
-            ChatService.update_conversation(
+            await AsyncChatService.update_conversation(
                 db=db,
                 conversation_id=conversation_id,
                 conversation_update=ConversationUpdate(title=title),
@@ -720,13 +718,13 @@ async def send_chat_message_with_images(
         ai_message=ai_message,
         total_tokens_used=input_tokens + output_tokens,
         cost_estimate=cost_estimate
-    ) 
+    )
 
 @router.post("/confirm-dish-selection", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)
 async def confirm_dish_selection(
     request: DishConfirmationRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Handle dish selection confirmation and log intake directly."""
     
@@ -739,7 +737,9 @@ async def confirm_dish_selection(
     
     try:
         # Get the dish
-        dish = db.query(Dish).filter(Dish.id == request.dish_id).first()
+        from sqlalchemy import select
+        dish_result = await db.execute(select(Dish).where(Dish.id == request.dish_id))
+        dish = dish_result.scalar_one_or_none()
         if not dish:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -748,9 +748,12 @@ async def confirm_dish_selection(
         
         # Find the conversation from the widget
         # We'll get the most recent conversation for this user
-        conversation = db.query(Conversation).filter(
-            Conversation.user_id == current_user.id
-        ).order_by(Conversation.updated_at.desc()).first()
+        conv_result = await db.execute(
+            select(Conversation).where(
+                Conversation.user_id == current_user.id
+            ).order_by(Conversation.updated_at.desc()).limit(1)
+        )
+        conversation = conv_result.scalar_one_or_none()
         
         if not conversation:
             raise HTTPException(
@@ -761,9 +764,12 @@ async def confirm_dish_selection(
         # Find the original message with the widget that needs to be updated
         # Query messages directly since there's no relationship defined
         from app.models.message import Message
-        conversation_messages = db.query(Message).filter(
-            Message.conversation_id == conversation.id
-        ).order_by(Message.created_at.desc()).all()
+        messages_result = await db.execute(
+            select(Message).where(
+                Message.conversation_id == conversation.id
+            ).order_by(Message.created_at.desc())
+        )
+        conversation_messages = messages_result.scalars().all()
         
         original_message = None
         for message in conversation_messages:
@@ -798,11 +804,11 @@ async def confirm_dish_selection(
                         break
                 
                 # Update the message with the new attachments
-                from app.services.chat import convert_decimals_to_floats
+                from app.services.async_chat import convert_decimals_to_floats
                 updated_attachments = convert_decimals_to_floats(current_attachments)
                 
                 original_message.attachments = updated_attachments
-                db.commit()
+                await db.commit()
                 api_logger.success("Original message updated with resolved widget", "CONFIRM",
                                  message_id=original_message.id)
         
@@ -815,7 +821,7 @@ async def confirm_dish_selection(
             extra_data={"is_control_message": True, "widget_id": request.widget_id}
         )
         
-        user_message = ChatService.create_message(
+        user_message = await AsyncChatService.create_message(
             db=db,
             conversation_id=conversation.id,
             message_data=user_message_data,
@@ -834,7 +840,7 @@ async def confirm_dish_selection(
             intake_time=datetime.now()
         )
         
-        intake_result = IntakeService.create_intake_by_name(
+        intake_result = await AsyncIntakeService.create_intake_by_name(
             db=db,
             intake_data=intake_data,
             current_user_id=current_user.id
@@ -871,7 +877,7 @@ async def confirm_dish_selection(
             extra_data={"generated": True, "intake_confirmation": True}
         )
         
-        ai_message = ChatService.create_message(
+        ai_message = await AsyncChatService.create_message(
             db=db,
             conversation_id=conversation.id,
             message_data=ai_message_data,
@@ -907,6 +913,4 @@ async def confirm_dish_selection(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to confirm dish selection: {str(e)}"
-        ) 
-
- 
+        )
