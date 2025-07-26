@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, extract, and_, case, desc, select
+from sqlalchemy.orm import selectinload
 from collections import defaultdict
 import statistics
 
@@ -141,9 +142,11 @@ class AsyncStatsService:
         time_range: StatsTimeRange
     ) -> CalorieStats:
         """Calculate comprehensive calorie statistics."""
-        # Get intakes in the specified range
+        # Get intakes in the specified range with eager loading of dish relationship
         result = await db.execute(
-            select(Intake).join(Dish).where(
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(
                 and_(
                     Intake.user_id == user_id,
                     func.date(Intake.intake_time) >= time_range.start_date,
@@ -228,7 +231,9 @@ class AsyncStatsService:
     ) -> MacronutrientStats:
         """Calculate macronutrient distribution and trends."""
         result = await db.execute(
-            select(Intake).join(Dish).where(
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(
                 and_(
                     Intake.user_id == user_id,
                     func.date(Intake.intake_time) >= time_range.start_date,
@@ -335,7 +340,9 @@ class AsyncStatsService:
     ) -> MicronutrientStats:
         """Calculate micronutrient intake and deficiency alerts."""
         result = await db.execute(
-            select(Intake).join(Dish).where(
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(
                 and_(
                     Intake.user_id == user_id,
                     func.date(Intake.intake_time) >= time_range.start_date,
@@ -410,7 +417,9 @@ class AsyncStatsService:
     ) -> ConsumptionPatternStats:
         """Calculate food consumption pattern statistics."""
         result = await db.execute(
-            select(Intake).join(Dish).where(
+            select(Intake)
+            .options(selectinload(Intake.dish))
+            .where(
                 and_(
                     Intake.user_id == user_id,
                     func.date(Intake.intake_time) >= time_range.start_date,
