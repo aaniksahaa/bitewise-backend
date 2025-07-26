@@ -43,7 +43,11 @@ class AsyncIntakeService(AsyncBaseService[Intake, IntakeCreate, IntakeUpdate]):
     @staticmethod
     def _create_intake_response(intake: Intake) -> IntakeResponse:
         """Helper method to create IntakeResponse with dish details."""
-        dish_detail = DishDetail.model_validate(intake.dish)
+        # Handle water-only intakes (no dish)
+        if intake.dish is None:
+            dish_detail = None
+        else:
+            dish_detail = DishDetail.model_validate(intake.dish)
         
         return IntakeResponse(
             id=intake.id,
@@ -59,7 +63,11 @@ class AsyncIntakeService(AsyncBaseService[Intake, IntakeCreate, IntakeUpdate]):
     @staticmethod
     def _create_intake_list_item(intake: Intake) -> IntakeListItem:
         """Helper method to create IntakeListItem with dish details."""
-        dish_detail = DishDetail.model_validate(intake.dish)
+        # Handle water-only intakes (no dish)
+        if intake.dish is None:
+            dish_detail = None
+        else:
+            dish_detail = DishDetail.model_validate(intake.dish)
         
         return IntakeListItem(
             id=intake.id,
@@ -172,6 +180,60 @@ class AsyncIntakeService(AsyncBaseService[Intake, IntakeCreate, IntakeUpdate]):
         except Exception as e:
             intake_logger.error(f"Failed to create intake: {str(e)}", "CREATE",
                               user_id=current_user_id, dish_id=intake_data.dish_id,
+                              error=str(e))
+            await db.rollback()
+            raise
+
+    async def create_water_intake(self, db: AsyncSession, water_ml: int, intake_time: datetime, current_user_id: int) -> IntakeResponse:
+        """Create a water-only intake record without requiring a dish"""
+        intake_logger.info(f"Creating water intake for user {current_user_id}", "CREATE_WATER",
+                         water_ml=water_ml)
+        
+        try:
+            # Create a special water intake record with no dish
+            db_intake = Intake(
+                user_id=current_user_id,
+                dish_id=None,  # No dish required for water
+                portion_size=1.0,  # Default portion size
+                intake_time=intake_time,
+                water_ml=water_ml
+            )
+            
+            intake_logger.debug("Adding water intake to database session", "CREATE_WATER",
+                              user_id=current_user_id, water_ml=water_ml)
+            
+            db.add(db_intake)
+            
+            intake_logger.debug("Committing water intake to database", "CREATE_WATER")
+            await db.commit()
+            
+            intake_logger.debug("Refreshing water intake from database", "CREATE_WATER")
+            await db.refresh(db_intake)
+            
+            intake_logger.success(f"✅ Water intake created successfully", "CREATE_WATER",
+                                intake_id=db_intake.id, water_ml=water_ml, 
+                                user_id=current_user_id)
+            
+            # Create a dummy dish for response (water has no nutritional values except water)
+            from app.models.dish import Dish
+            water_dish = Dish(
+                id=0,
+                name="Water",
+                description="Pure water intake",
+                calories=0,
+                protein_g=0,
+                carbs_g=0,
+                fats_g=0
+            )
+            
+            # Set the dish relationship manually for response
+            db_intake.dish = water_dish
+            
+            return self._create_intake_response(db_intake)
+            
+        except Exception as e:
+            intake_logger.error(f"Failed to create water intake: {str(e)}", "CREATE_WATER",
+                              user_id=current_user_id, water_ml=water_ml,
                               error=str(e))
             await db.rollback()
             raise

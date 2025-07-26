@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional
+from pydantic import BaseModel, Field
 
 from app.db.async_session import get_async_db
 from app.services.async_auth import get_current_active_user_async
@@ -16,6 +17,29 @@ from app.schemas.intake import (
 from app.models.user import User
 
 router = APIRouter()
+
+
+class WaterIntakeCreate(BaseModel):
+    """Schema for water-only intake logging."""
+    water_ml: int = Field(..., gt=0, description="Water consumed in milliliters")
+    intake_time: datetime = Field(default_factory=datetime.now, description="Time when water was consumed")
+
+
+@router.post("/water", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
+async def log_water_intake(
+    water_data: WaterIntakeCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
+):
+    """Log water intake without requiring a dish."""
+    # Create a special intake record for water with a dummy dish_id of 0
+    # We'll handle this specially in the service
+    return await async_intake_service.create_water_intake(
+        db=db,
+        water_ml=water_data.water_ml,
+        intake_time=water_data.intake_time,
+        current_user_id=current_user.id
+    )
 
 
 @router.post("/", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
