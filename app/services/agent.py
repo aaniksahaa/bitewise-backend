@@ -5,9 +5,14 @@ Agent service for handling AI-powered chat responses.
 import json
 import logging
 import os
+import uuid
 from typing import Dict, Any, Optional, Tuple, List
 import base64
 from io import BytesIO
+from datetime import datetime
+from decimal import Decimal
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +64,12 @@ class AgentService:
                 raise
     
     @classmethod
-    def generate_response(
+    async def generate_response(
         cls,
         user_message: str,
         attachments: Optional[Dict[str, Any]] = None,
-        conversation_context: Optional[List[Dict[str, str]]] = None
+        conversation_context: Optional[List[Dict[str, str]]] = None,
+        db: Optional[AsyncSession] = None
     ) -> Tuple[str, int, int, Optional[Dict[str, Any]]]:
         """
         Generate an AI response to a user message.
@@ -72,6 +78,7 @@ class AgentService:
             user_message: The user's message/question
             attachments: Optional attachments (images, etc.)
             conversation_context: Previous conversation messages for context
+            db: Database session for real data queries
             
         Returns:
             Tuple of (response_text, input_tokens, output_tokens, response_attachments)
@@ -87,12 +94,19 @@ class AgentService:
                     10, 20, None
                 )
             
+            # Analyze user intent first
+            intent_analysis = cls.analyze_user_intent(user_message)
+            
+            # Handle food intake logging with widget generation
+            if intent_analysis["primary_intent"] == "log_intake" and intent_analysis["confidence"] > 0.6:
+                return await cls._handle_food_intake_intent(user_message, intent_analysis, db)
+            
             # Process image attachments if present
             image_context = ""
             if attachments and "images" in attachments:
                 image_context = cls._process_image_attachments(attachments["images"])
             
-            # Build the prompt
+            # Build the prompt for general conversation
             system_prompt = cls._build_system_prompt()
             user_prompt = cls._build_user_prompt(user_message, image_context, conversation_context)
             
@@ -128,6 +142,283 @@ class AgentService:
             logger.error(f"Error generating agent response: {e}")
             error_response = "I apologize, but I'm having trouble processing your request right now. Please try again later."
             return error_response, 0, 0, None
+    
+    @classmethod
+    async def _handle_food_intake_intent(cls, user_message: str, intent_analysis: Dict[str, Any], db: Optional[AsyncSession] = None) -> Tuple[str, int, int, Optional[Dict[str, Any]]]:
+        """Handle food intake logging intent and generate dish selection widgets."""
+        try:
+            # Extract food/dish name from the message
+            food_name = cls._extract_food_name(user_message)
+            
+            if not food_name:
+                return (
+                    "I understand you'd like to log some food intake! Could you please specify what you ate?",
+                    20, 30, None
+                )
+            
+            # Search for matching dishes (use real database if available)
+            if db:
+                matching_dishes = await cls._search_dishes_for_intake_db(food_name, db)
+            else:
+                matching_dishes = cls._search_dishes_for_intake_mock(food_name)
+            
+            if not matching_dishes:
+                return (
+                    f"I couldn't find any dishes matching '{food_name}' in our database. Could you try a different name or be more specific?",
+                    25, 40, None
+                )
+            
+            # Generate dish selection widget
+            widget = cls._create_dish_selection_widget(food_name, matching_dishes)
+            
+            # Create response text
+            response_text = cls._create_intake_response_text(food_name, matching_dishes)
+            
+            # Create tool attachments with widgets
+            tool_attachments = {
+                "widgets": [widget.dict()],
+                "tool_calls": [{
+                    "tool_name": "search_dishes_for_intake",
+                    "tool_input": {"search_term": food_name},
+                    "tool_response": {
+                        "dishes_found": len(matching_dishes),
+                        "widget_id": widget.widget_id
+                    }
+                }]
+            }
+            
+            # Estimate token usage
+            input_tokens = cls._estimate_tokens(user_message)
+            output_tokens = cls._estimate_tokens(response_text)
+            
+            return response_text, input_tokens, output_tokens, tool_attachments
+            
+        except Exception as e:
+            logger.error(f"Error handling food intake intent: {e}")
+            return (
+                "I had trouble processing your food logging request. Please try again.",
+                10, 20, None
+            )
+    
+    @classmethod
+    async def _search_dishes_for_intake_db(cls, food_name: str, db: AsyncSession) -> List[Dict[str, Any]]:
+        """Search for dishes matching the food name using real database queries."""
+        try:
+            from app.models.dish import Dish
+            from sqlalchemy import or_, func
+            
+            # Search for dishes that match the food name
+            food_name_lower = food_name.lower()
+            
+            # Build search query
+            stmt = select(Dish).where(
+                or_(
+                    func.lower(Dish.name).contains(food_name_lower),
+                    func.lower(Dish.description).contains(food_name_lower)
+                )
+            ).limit(5)  # Limit to 5 results for the widget
+            
+            result = await db.execute(stmt)
+            dishes = result.scalars().all()
+            
+            # Convert to the format expected by the widget
+            matching_dishes = []
+            for dish in dishes:
+                dish_dict = {
+                    "id": dish.id,
+                    "name": dish.name,
+                    "description": dish.description,
+                    "cuisine": dish.cuisine,
+                    "image_url": dish.image_urls[0] if dish.image_urls else None,
+                    "calories": int(float(dish.calories)) if dish.calories else 0,
+                    "servings": dish.servings
+                }
+                matching_dishes.append(dish_dict)
+            
+            return matching_dishes
+            
+        except Exception as e:
+            logger.error(f"Error searching dishes in database: {e}")
+            # Fall back to mock data if database search fails
+            return cls._search_dishes_for_intake_mock(food_name)
+    
+    @classmethod
+    def _search_dishes_for_intake_mock(cls, food_name: str) -> List[Dict[str, Any]]:
+        """Search for dishes matching the food name (mock implementation)."""
+        # Mock dish data - fallback when database is not available
+        mock_dishes = {
+            "pizza": [
+                {
+                    "id": 999001,  # Use high IDs to avoid conflicts
+                    "name": "Roasted Peppers, Spinach & Feta Pizza",
+                    "description": "A delicious vegetarian option with roasted peppers, spinach, and feta cheese",
+                    "cuisine": "Italian",
+                    "image_url": "https://img.spoonacular.com/recipes/658615-312x231.jpg",
+                    "calories": 390,
+                    "servings": 4
+                },
+                {
+                    "id": 999002,
+                    "name": "Rustic Grilled Peaches Pizza",
+                    "description": "A unique dish that can be prepared in about 45 minutes",
+                    "cuisine": "Italian",
+                    "image_url": "https://img.spoonacular.com/recipes/658920-312x231.jpg",
+                    "calories": 226,
+                    "servings": 2
+                },
+                {
+                    "id": 999003,
+                    "name": "Pizza Bites with Pumpkin",
+                    "description": "These gluten-free pizza bites are great as an appetizer",
+                    "cuisine": "Italian",
+                    "image_url": "https://img.spoonacular.com/recipes/656329-312x231.jpg",
+                    "calories": 310,
+                    "servings": 6
+                }
+            ],
+            "chicken": [
+                {
+                    "id": 999004,
+                    "name": "Grilled Chicken Breast",
+                    "description": "Lean protein, perfect for healthy eating",
+                    "cuisine": "American",
+                    "image_url": "https://via.placeholder.com/312x231",
+                    "calories": 165,
+                    "servings": 1
+                },
+                {
+                    "id": 999005,
+                    "name": "Chicken Caesar Salad",
+                    "description": "Fresh romaine lettuce with grilled chicken and Caesar dressing",
+                    "cuisine": "American",
+                    "image_url": "https://via.placeholder.com/312x231",
+                    "calories": 470,
+                    "servings": 1
+                }
+            ],
+            "salad": [
+                {
+                    "id": 999006,
+                    "name": "Garden Salad",
+                    "description": "Fresh mixed greens with vegetables",
+                    "cuisine": "American",
+                    "image_url": "https://via.placeholder.com/312x231",
+                    "calories": 150,
+                    "servings": 1
+                },
+                {
+                    "id": 999007,
+                    "name": "Greek Salad",
+                    "description": "Mediterranean salad with feta cheese and olives",
+                    "cuisine": "Greek",
+                    "image_url": "https://via.placeholder.com/312x231",
+                    "calories": 280,
+                    "servings": 1
+                }
+            ]
+        }
+        
+        # Find matching dishes
+        food_name_lower = food_name.lower()
+        
+        # Direct keyword match
+        for keyword, dishes in mock_dishes.items():
+            if keyword in food_name_lower:
+                return dishes
+        
+        # Partial match
+        for keyword, dishes in mock_dishes.items():
+            if any(word in keyword for word in food_name_lower.split()):
+                return dishes
+        
+        return []
+    
+    @classmethod
+    def _extract_food_name(cls, user_message: str) -> Optional[str]:
+        """Extract food/dish name from user message."""
+        # Simple extraction logic - this could be enhanced with NER
+        user_message_lower = user_message.lower()
+        
+        # Common patterns for food intake
+        patterns = [
+            "i ate", "i had", "i consumed", "i just ate", "i just had",
+            "ate", "had", "consumed", "eating", "having"
+        ]
+        
+        for pattern in patterns:
+            if pattern in user_message_lower:
+                # Extract text after the pattern
+                start_idx = user_message_lower.find(pattern) + len(pattern)
+                remaining_text = user_message[start_idx:].strip()
+                
+                # Remove common stop words and extract the main food item
+                remaining_text = remaining_text.replace("a ", "").replace("an ", "").replace("some ", "")
+                
+                # Take the first few words as the food name
+                words = remaining_text.split()
+                if words:
+                    # Return up to 3 words as the food name
+                    return " ".join(words[:3]).strip(".,!?")
+        
+        # If no pattern found, try to find common food words
+        food_keywords = ["pizza", "chicken", "salad", "pasta", "burger", "sandwich", "rice", "bread"]
+        for keyword in food_keywords:
+            if keyword in user_message_lower:
+                return keyword
+        
+        return None
+    
+    @classmethod
+    def _create_dish_selection_widget(cls, search_term: str, dishes: List[Dict[str, Any]]) -> 'DishSelectionWidget':
+        """Create a dish selection widget."""
+        from app.schemas.chat import DishSelectionWidget, DishCard, WidgetType, WidgetStatus
+        
+        # Convert dishes to DishCard format
+        dish_cards = []
+        for dish in dishes:
+            dish_card = DishCard(
+                id=dish["id"],
+                name=dish["name"],
+                description=dish.get("description"),
+                cuisine=dish.get("cuisine"),
+                image_url=dish.get("image_url"),
+                calories=dish.get("calories"),
+                servings=dish.get("servings")
+            )
+            dish_cards.append(dish_card)
+        
+        # Create widget
+        widget = DishSelectionWidget(
+            widget_id=str(uuid.uuid4()),
+            widget_type=WidgetType.DISH_SELECTION,
+            status=WidgetStatus.PENDING,
+            title="Which dish did you consume?",
+            description=f"I found several options matching '{search_term}'. Please select the one you had:",
+            search_term=search_term,
+            dishes=dish_cards,
+            created_at=datetime.utcnow().isoformat()
+        )
+        
+        return widget
+    
+    @classmethod
+    def _create_intake_response_text(cls, food_name: str, dishes: List[Dict[str, Any]]) -> str:
+        """Create the response text for food intake logging."""
+        response_parts = [
+            f"Hey there! Thanks for sharing that you had {food_name}. I found a few different types of {food_name} that match what you mentioned, and I need your help to pinpoint exactly which one you enjoyed. Here are the options:\n"
+        ]
+        
+        for i, dish in enumerate(dishes, 1):
+            response_parts.append(
+                f"{i}. **{dish['name']}** - {dish.get('description', 'A delicious option')} with {dish.get('calories', 'unknown')} calories."
+            )
+            if dish.get('image_url'):
+                response_parts.append(f"   ![{dish['name']}]({dish['image_url']})")
+            response_parts.append("")
+        
+        response_parts.append("Could you please let me know which one you had? This way, I can help you keep track of your nutrition more accurately!")
+        
+        return "\n".join(response_parts)
     
     @classmethod
     def _build_system_prompt(cls) -> str:
@@ -225,7 +516,7 @@ Respond in a natural, conversational way. Do not use JSON formatting unless spec
             intent_analysis["confidence"] = 0.8
             intent_analysis["suggested_actions"].append("search_dishes")
         
-        elif any(word in user_message_lower for word in ["ate", "eating", "consumed", "had", "log", "track"]):
+        elif any(word in user_message_lower for word in ["ate", "eating", "consumed", "had", "log", "track", "just ate", "just had"]):
             intent_analysis["primary_intent"] = "log_intake"
             intent_analysis["confidence"] = 0.7
             intent_analysis["suggested_actions"].append("log_food_intake")

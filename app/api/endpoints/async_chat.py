@@ -333,12 +333,11 @@ async def send_chat_message(
         # Generate AI response
         api_logger.separator("┈", 40, "AI")
         api_logger.debug("Calling AgentService.generate_response", "AI")
-        ai_response, input_tokens, output_tokens, tool_attachments = AgentService.generate_response(
+        ai_response, input_tokens, output_tokens, tool_attachments = await AgentService.generate_response(
             user_message=chat_request.message,
             conversation_context=None,  # Could add conversation history here
             attachments=chat_request.attachments,
-            db=db,
-            current_user_id=current_user.id
+            db=db
         )
         
         api_logger.success("AI response generated", "AI", 
@@ -348,18 +347,13 @@ async def send_chat_message(
         # Log widget attachments specifically
         if tool_attachments and "widgets" in tool_attachments:
             widgets = tool_attachments["widgets"]
-            api_logger.success(f"🎯 Found {len(widgets)} widgets in tool attachments", "AI",
-                             widget_count=len(widgets))
-            for widget in widgets:
-                if isinstance(widget, dict):
-                    widget_id = widget.get("widget_id", "unknown")
-                    widget_type = widget.get("widget_type", "unknown")
-                    dishes_count = len(widget.get("dishes", []))
-                    api_logger.info(f"📋 Widget details: {widget_type} ({widget_id}) with {dishes_count} dishes", "AI",
-                                   widget_id=widget_id, widget_type=widget_type, dishes_count=dishes_count)
-        
+            api_logger.debug("Generated widget attachments", "AI", 
+                           widget_count=len(widgets), 
+                           widget_types=[w.get("type") for w in widgets])
+
         # Get default model for cost calculation
-        default_model = AgentService.get_default_model(db)
+        # TODO: Implement get_default_model method in AgentService
+        default_model = None
         
         # Create AI message
         api_logger.separator("┈", 40, "STORAGE")
@@ -655,16 +649,16 @@ async def send_chat_message_with_images(
         }
     
     # Generate AI response
-    ai_response, input_tokens, output_tokens, tool_attachments = AgentService.generate_response(
+    ai_response, input_tokens, output_tokens, tool_attachments = await AgentService.generate_response(
         user_message=message,
         conversation_context=None,
         attachments=agent_attachments,
-        db=db,
-        current_user_id=current_user.id
+        db=db
     )
     
     # Get default model for cost calculation
-    default_model = AgentService.get_default_model(db)
+    # TODO: Implement get_default_model method in AgentService
+    default_model = None
     
     # Create AI message
     ai_message_data = MessageCreate(
@@ -840,7 +834,9 @@ async def confirm_dish_selection(
             intake_time=datetime.now()
         )
         
-        intake_result = await AsyncIntakeService.create_intake_by_name(
+        # Create intake service instance
+        intake_service = AsyncIntakeService()
+        intake_result = await intake_service.create_intake_by_name(
             db=db,
             intake_data=intake_data,
             current_user_id=current_user.id

@@ -278,21 +278,24 @@ class TestAsyncDatabaseOperations:
             "consumed_at": datetime.utcnow()
         }
         
-        intake = await AsyncIntakeService.create_intake(async_db_session, intake_data)
+        # Create intake service instance
+        intake_service = AsyncIntakeService()
+        
+        intake = await intake_service.create_intake(async_db_session, intake_data)
         assert intake.id is not None
         assert intake.user_id == async_test_user.id
         assert intake.dish_id == dish.id
         assert intake.quantity == 1.5
         
         # Test intake retrieval
-        user_intakes = await AsyncIntakeService.get_user_intakes(
+        user_intakes = await intake_service.get_user_intakes(
             async_db_session, async_test_user.id, limit=10
         )
         assert len(user_intakes) >= 1
         assert any(i.dish_id == dish.id for i in user_intakes)
         
         # Test intake statistics
-        stats = await AsyncIntakeService.get_user_intake_stats(
+        stats = await intake_service.get_user_intake_stats(
             async_db_session, async_test_user.id
         )
         assert stats is not None
