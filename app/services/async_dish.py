@@ -68,6 +68,14 @@ class AsyncDishService:
         # Otherwise, use the original filtering logic
         stmt = select(Dish)
         
+        # Filter out dishes without images
+        stmt = stmt.where(
+            and_(
+                Dish.image_urls.is_not(None),
+                func.array_length(Dish.image_urls, 1) > 0
+            )
+        )
+        
         # Apply cuisine filter
         if cuisine:
             stmt = stmt.where(Dish.cuisine.ilike(f"%{cuisine}%"))
@@ -178,8 +186,14 @@ class AsyncDishService:
             Dish.cuisine.ilike(f"%{search_term}%")
         )
         
-        # Build query
-        stmt = select(Dish).where(search_filter)
+        # Build query with image filter
+        stmt = select(Dish).where(
+            and_(
+                search_filter,
+                Dish.image_urls.is_not(None),
+                func.array_length(Dish.image_urls, 1) > 0
+            )
+        )
         
         # Get total count before pagination
         count_stmt = select(func.count()).select_from(stmt.subquery())

@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, List
 
 from app.db.async_session import get_async_db
 from app.services.async_auth import get_current_active_user_async
 from app.services.async_dish import AsyncDishService
+from app.services.async_ingredient import AsyncIngredientService
 from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListResponse
+from app.schemas.ingredient import DishIngredientResponse
 from app.models.user import User
 
 router = APIRouter()
@@ -170,3 +172,23 @@ async def delete_dish(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Dish not found"
         ) 
+
+
+@router.get("/{dish_id}/ingredients", response_model=List[DishIngredientResponse])
+async def get_dish_ingredients(
+    dish_id: int,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Get all ingredients for a specific dish."""
+    # First check if dish exists
+    dish = await AsyncDishService.get_dish_by_id(db=db, dish_id=dish_id)
+    if not dish:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dish not found"
+        )
+    
+    return await AsyncIngredientService.get_ingredients_by_dish_id(
+        db=db,
+        dish_id=dish_id
+    ) 

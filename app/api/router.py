@@ -11,6 +11,7 @@ from app.api.endpoints import (
     async_chat,
     community,
     dishes,
+    ingredients,
     fitness,
     health,
     intakes,
@@ -28,6 +29,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(user_profile.router, prefix="/profile", tags=["profile"])
 api_router.include_router(async_chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(dishes.router, prefix="/dishes", tags=["dishes"])
+api_router.include_router(ingredients.router, prefix="/ingredients", tags=["ingredients"])
 api_router.include_router(community.router, prefix="/community", tags=["community"])
 api_router.include_router(fitness.router, prefix="/fitness", tags=["fitness"])
 api_router.include_router(intakes.router, prefix="/intakes", tags=["intakes"])
