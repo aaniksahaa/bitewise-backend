@@ -562,6 +562,18 @@ If images show food items, consider using search tools to help identify or provi
                     tool_attachments = widget_result
                     logger.info(f"✅ [AGENT/WIDGET] Dish selection widget created successfully")
             
+            # Create video widget for YouTube search results
+            if tool_name == "search_youtube_videos" and tool_output.get("success"):
+                logger.info(f"🎥 [AGENT/VIDEO] Creating video selection widget for YouTube results")
+                video_widget_result = cls._create_video_widget(
+                    tool_output.get("videos", []),
+                    tool_output.get("query", ""),
+                    tool_output.get("total_results")
+                )
+                if video_widget_result:
+                    tool_attachments = video_widget_result
+                    logger.info(f"✅ [AGENT/VIDEO] Video selection widget created successfully")
+            
             # Generate final response using the tool result
             logger.info(f"📝 [AGENT/FINAL] Generating final response with tool result")
             
@@ -579,7 +591,7 @@ Reference the images if they were relevant to the tool usage.
 
 If you created a dish selection widget, explain that you found multiple matching dishes and ask the user to select which one they actually consumed from the options provided.
 
-If you found YouTube videos, mention the number of videos found and encourage the user to check them out.
+If you found YouTube videos, mention the number of videos found and encourage the user to browse through the interactive video gallery below. Mention that they can click any video to watch it on YouTube.
 
 If you found dishes for search, mention the variety and nutritional information available.
 """)
@@ -607,7 +619,7 @@ If you found dishes for search, mention the variety and nutritional information 
                         final_content = f"Great! I found {dish_count} dishes matching '{search_term}'. Please select which one you actually consumed from the options below so I can log your intake accurately and track your nutrition!"
                     elif tool_name == "search_youtube_videos":
                         videos_count = len(tool_output.get("videos", []))
-                        final_content = f"Perfect! I found {videos_count} YouTube videos for '{tool_output.get('query', 'your search')}'! These videos should be really helpful for your request. Check them out below!"
+                        final_content = f"Perfect! I found {videos_count} helpful cooking videos for '{tool_output.get('query', 'your search')}'! Browse through the interactive video gallery below - you can click on any video to watch it directly on YouTube. These videos should be really helpful for your cooking needs!"
                     else:
                         final_content = "I've completed your request!"
                         
@@ -780,7 +792,55 @@ If you found dishes for search, mention the variety and nutritional information 
         except Exception as e:
             logger.error(f"❌ [AGENT/WIDGET] Error creating intake widget: {e}")
             return None
-    
+
+    @classmethod
+    def _create_video_widget(cls, videos_data: List[Dict[str, Any]], query: str, total_results: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Create a video selection widget for YouTube search results."""
+        try:
+            from app.schemas.chat import VideoSelectionWidget, VideoData, WidgetType, WidgetStatus
+            import uuid
+            from datetime import datetime
+            
+            if not videos_data:
+                logger.warning(f"🚫 [AGENT/VIDEO] No videos provided for widget creation")
+                return None
+            
+            # Convert video data to VideoData format
+            video_objects = []
+            for video in videos_data:
+                video_obj = VideoData(
+                    video_id=video.get("video_id", ""),
+                    title=video.get("title", ""),
+                    description=video.get("description", ""),
+                    channel_title=video.get("channel_title", ""),
+                    thumbnail_url=video.get("thumbnail_url", ""),
+                    video_url=video.get("video_url", ""),
+                    published_at=video.get("published_at", "")
+                )
+                video_objects.append(video_obj)
+            
+            # Create widget
+            widget_id = f"video_sel_{uuid.uuid4().hex[:8]}"
+            widget = VideoSelectionWidget(
+                widget_id=widget_id,
+                widget_type=WidgetType.VIDEO_SELECTION,
+                status=WidgetStatus.RESOLVED,  # Videos are immediately available
+                videos=video_objects,
+                query=query,
+                total_results=total_results,
+                created_at=datetime.utcnow().isoformat()
+            )
+            
+            logger.info(f"🎥 [AGENT/VIDEO] Created video widget with {len(video_objects)} videos for '{query}' (widget_id: {widget_id})")
+            
+            return {
+                "widgets": [widget.dict()]
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [AGENT/VIDEO] Error creating video widget: {e}")
+            return None
+
     @classmethod
     def _estimate_tokens(cls, text: str) -> int:
         """Estimate token count for text (rough approximation)."""

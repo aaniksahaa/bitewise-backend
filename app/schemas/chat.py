@@ -34,6 +34,7 @@ class WidgetType(str, Enum):
     DISH_SELECTION = "dish_selection"
     CONFIRMATION = "confirmation"
     INFO_CARD = "info_card"
+    VIDEO_SELECTION = "video_selection"
 
 
 class WidgetStatus(str, Enum):
@@ -64,8 +65,8 @@ class FileAttachment(BaseModel):
 
 
 class DishCard(BaseModel):
-    """Simplified dish representation for widgets and UI cards."""
-    id: int = Field(..., description="Dish ID")
+    """Schema for dish cards in selection widgets."""
+    id: int = Field(..., description="Unique dish ID")
     name: str = Field(..., description="Dish name")
     description: Optional[str] = Field(default=None, description="Dish description (truncated)")
     cuisine: Optional[str] = Field(default=None, description="Cuisine type")
@@ -74,6 +75,17 @@ class DishCard(BaseModel):
     # Only keep basic calorie info for display if needed
     calories: Optional[int] = Field(default=None, description="Calories per serving (rounded)")
     servings: Optional[int] = Field(default=None, description="Number of servings")
+
+
+class VideoData(BaseModel):
+    """Schema for video information in video selection widgets."""
+    video_id: str = Field(..., description="YouTube video ID")
+    title: str = Field(..., description="Video title")
+    description: str = Field(..., description="Video description")
+    channel_title: str = Field(..., description="Channel name")
+    thumbnail_url: str = Field(..., description="Video thumbnail URL")
+    video_url: str = Field(..., description="Full YouTube video URL")
+    published_at: Optional[str] = Field(default=None, description="Video publication date")
 
 
 class DishSelectionWidget(BaseModel):
@@ -91,6 +103,18 @@ class DishSelectionWidget(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional widget metadata")
     created_at: Optional[str] = Field(default=None, description="Widget creation timestamp")
     resolved_at: Optional[str] = Field(default=None, description="Widget resolution timestamp")
+
+
+class VideoSelectionWidget(BaseModel):
+    """Widget for displaying YouTube video search results."""
+    widget_id: str = Field(..., description="Unique widget identifier")
+    widget_type: WidgetType = Field(default=WidgetType.VIDEO_SELECTION, description="Widget type")
+    status: WidgetStatus = Field(default=WidgetStatus.RESOLVED, description="Widget status (videos are always resolved)")
+    videos: List[VideoData] = Field(..., description="YouTube video results")
+    query: str = Field(..., description="Original search query")
+    total_results: Optional[int] = Field(default=None, description="Total results available")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional widget metadata")
+    created_at: Optional[str] = Field(default=None, description="Widget creation timestamp")
 
 
 class ControlMessage(BaseModel):
