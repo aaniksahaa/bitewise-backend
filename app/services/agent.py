@@ -282,6 +282,19 @@ class AgentService:
             }
         
         @tool
+        def get_food_recommendation(food_item: str, user_message: str) -> Dict[str, Any]:
+            """Get personalized food recommendations and health advice. Use this when users ask about whether they should eat something, plan to eat something, or want advice about food choices based on their health. Parameters: food_item (string), user_message (string - the original user message for context)"""
+            logger.info(f"🏥 [TOOL/HEALTH] Getting personalized food recommendation for: '{food_item}'")
+            
+            return {
+                "success": True,
+                "food_item": food_item,
+                "user_message": user_message,
+                "action": "analyze_food_for_health",
+                "message": f"Will analyze '{food_item}' based on user's health profile"
+            }
+        
+        @tool
         def search_youtube_videos(query: str, max_results: int = 5) -> Dict[str, Any]:
             """Search for YouTube videos by query. Use this when the user asks for cooking tutorials, recipe videos, workout videos, or any educational content that would benefit from video demonstrations. Parameters: query (string), max_results (int, default 5)"""
             logger.info(f"🎥 [TOOL/YOUTUBE] Searching YouTube for: '{query}' (max: {max_results})")
@@ -375,7 +388,7 @@ class AgentService:
                     "videos": []
                 }
         
-        tools = [search_dishes, search_dishes_for_intake, search_youtube_videos]
+        tools = [search_dishes, search_dishes_for_intake, get_food_recommendation, search_youtube_videos]
         logger.info(f"✅ [AGENT/TOOLS] Created {len(tools)} tools: {[t.name for t in tools]}")
         
         return tools
@@ -394,7 +407,8 @@ class AgentService:
         user_message: str,
         attachments: Optional[Dict[str, Any]] = None,
         conversation_context: Optional[List[Dict[str, str]]] = None,
-        db: Optional[AsyncSession] = None
+        db: Optional[AsyncSession] = None,
+        current_user_id: Optional[int] = None
     ) -> Tuple[str, int, int, Optional[Dict[str, Any]]]:
         """
         Generate an AI response to a user message using proper LLM agent pattern.
@@ -442,7 +456,7 @@ class AgentService:
             # Create the agent prompt template
             agent_prompt = ChatPromptTemplate.from_template("""
 You are BiteWise, a helpful AI assistant for nutrition and health tracking. 
-You help users with general questions and have access to specialized tools for dish searching and YouTube videos.
+You help users with general questions and have access to specialized tools for dish searching, food recommendations, and YouTube videos.
 
 {context}
 
@@ -465,21 +479,36 @@ If no tool is needed, respond with:
   "response": "Final natural language response"
 }}
 
-FOOD INTAKE WORKFLOW:
-When users mention eating or consuming food (e.g., "I ate 2 pizzas", "I had chicken breast", "I consumed some pasta"), follow this workflow:
-
-1. Use the `search_dishes_for_intake` tool to find matching dishes
-2. This creates an interactive dish selection widget that shows the user multiple options
-3. The user will then select their preferred dish and confirm the portion size
-4. The actual intake logging happens after user confirmation (you don't handle this step)
-
 TOOL USAGE GUIDELINES:
-- `search_dishes_for_intake`: When users mention eating/consuming food for intake tracking
-- `search_dishes`: When users ask about finding dishes, recipes, or nutritional information (not for intake)
-- `search_youtube_videos`: When users ask for cooking tutorials, recipe videos, workout instructions, or educational content
+
+1. **FOOD INTAKE LOGGING** - Use `search_dishes_for_intake`:
+   - When users mention they ATE/CONSUMED/HAD something (past tense)
+   - Examples: "I ate 2 pizzas", "I had chicken breast", "I consumed pasta"
+   - This creates an interactive dish selection widget for logging completed intake
+
+2. **FOOD RECOMMENDATIONS & HEALTH ADVICE** - Use `get_food_recommendation`:
+   - When users ask for advice about FUTURE food choices
+   - When users ask "Should I eat...", "Can I have...", "Is it okay to eat..."
+   - When users mention planning to eat something: "I want to eat", "I'm planning to have", "I'm thinking of eating"
+   - When users ask about food suitability based on health conditions, allergies, or dietary restrictions
+   - Examples: "Should I eat pizza tonight?", "Can I have milk with my allergies?", "Is pasta good for my diabetes?"
+
+3. **GENERAL DISH SEARCH** - Use `search_dishes`:
+   - When users ask about finding dishes, recipes, or nutritional information (not for intake or health advice)
+   - When users want to explore food options without specific health concerns
+   - Examples: "Show me Italian dishes", "Find recipes with chicken"
+
+4. **VIDEO TUTORIALS** - Use `search_youtube_videos`:
+   - When users ask for cooking tutorials, recipe videos, workout instructions, or educational content
+   - Examples: "How to cook pasta", "Show me workout videos"
+
+FOOD INTAKE vs FOOD RECOMMENDATION DISTINCTION:
+- Past/completed actions → `search_dishes_for_intake` (for logging)
+- Future/planning actions → `get_food_recommendation` (for health advice)
+- General exploration → `search_dishes` (for information)
 
 Be conversational, friendly, and focus on helping users with their health and nutrition goals.
-If images show food items, consider using search tools to help identify or provide information about the foods.
+If images show food items, consider using appropriate tools to help identify or provide information about the foods.
 """)
             
             # Prepare input data
@@ -549,6 +578,17 @@ If images show food items, consider using search tools to help identify or provi
                 search_result = await cls._execute_dish_search(tool_input.get("search_term", ""), db)
                 tool_output.update(search_result)
             
+            # Handle food recommendation analysis
+            if tool_output.get("success") and tool_output.get("action") == "analyze_food_for_health":
+                logger.info(f"🏥 [AGENT/HEALTH] Analyzing food recommendation based on user health profile")
+                recommendation_result = await cls._analyze_food_for_health(
+                    food_item=tool_input.get("food_item", ""),
+                    user_message=tool_input.get("user_message", ""),
+                    db=db,
+                    user_id=current_user_id
+                )
+                tool_output.update(recommendation_result)
+            
             # Handle special case for intake tool - create widget
             tool_attachments = None
             if tool_name == "search_dishes_for_intake" and tool_output.get("success"):
@@ -591,6 +631,8 @@ Reference the images if they were relevant to the tool usage.
 
 If you created a dish selection widget, explain that you found multiple matching dishes and ask the user to select which one they actually consumed from the options provided.
 
+If you provided food recommendations, present the advice clearly and mention that it's based on their health profile (if personalized) or general nutritional guidelines.
+
 If you found YouTube videos, mention the number of videos found and encourage the user to browse through the interactive video gallery below. Mention that they can click any video to watch it on YouTube.
 
 If you found dishes for search, mention the variety and nutritional information available.
@@ -617,6 +659,16 @@ If you found dishes for search, mention the variety and nutritional information 
                         dish_count = tool_output.get("dishes_found", 0)
                         search_term = tool_output.get("search_term", "your query")
                         final_content = f"Great! I found {dish_count} dishes matching '{search_term}'. Please select which one you actually consumed from the options below so I can log your intake accurately and track your nutrition!"
+                    elif tool_name == "get_food_recommendation":
+                        food_item = tool_output.get("food_item", "the food item")
+                        if tool_output.get("user_has_profile"):
+                            factors = tool_output.get("health_factors_considered", [])
+                            factors_text = ", ".join(factors) if factors else "your health profile"
+                            final_content = f"Based on {factors_text}, here's my personalized advice about {food_item}: {tool_output.get('recommendation', 'I recommend consulting with a healthcare professional.')}"
+                        else:
+                            final_content = f"Here's some general nutritional guidance about {food_item}: {tool_output.get('recommendation', 'Please consider consulting with a healthcare professional for personalized advice.')}"
+                            if tool_output.get("note"):
+                                final_content += f" {tool_output.get('note')}"
                     elif tool_name == "search_youtube_videos":
                         videos_count = len(tool_output.get("videos", []))
                         final_content = f"Perfect! I found {videos_count} helpful cooking videos for '{tool_output.get('query', 'your search')}'! Browse through the interactive video gallery below - you can click on any video to watch it directly on YouTube. These videos should be really helpful for your cooking needs!"
@@ -885,3 +937,247 @@ If you found dishes for search, mention the variety and nutritional information 
                 "error": str(e),
                 "service": "AgentService"
             }
+
+    @classmethod
+    async def _analyze_food_for_health(
+        cls, 
+        food_item: str, 
+        user_message: str, 
+        db: Optional[AsyncSession],
+        user_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze food suitability based on user's health profile and provide personalized recommendations.
+        
+        Args:
+            food_item: The food item to analyze
+            user_message: Original user message for context
+            db: Database session
+            user_id: Current user ID (if not provided, will return general advice)
+            
+        Returns:
+            Dictionary with recommendation results
+        """
+        if not db:
+            return {
+                "success": False,
+                "error": "Database not available",
+                "recommendation": "Unable to access your health profile for personalized advice."
+            }
+        
+        try:
+            # Initialize LLM if needed
+            cls._initialize_llm()
+            
+            # If no user_id provided, return general advice
+            if not user_id:
+                logger.warning(f"🔍 [AGENT/HEALTH] No user ID provided for personalized advice")
+                return await cls._generate_general_food_advice(food_item, user_message)
+            
+            # Fetch user profile with health data
+            logger.info(f"🔍 [AGENT/HEALTH] Fetching health profile for user {user_id}")
+            from app.services.async_user_profile import AsyncUserProfileService
+            
+            try:
+                user_profile = await AsyncUserProfileService.get_profile_optional(db, user_id)
+            except Exception as e:
+                logger.warning(f"⚠️ [AGENT/HEALTH] Could not fetch user profile: {e}")
+                return await cls._generate_general_food_advice(food_item, user_message)
+            
+            if not user_profile:
+                logger.info(f"ℹ️ [AGENT/HEALTH] No profile found for user {user_id}, providing general advice")
+                return await cls._generate_general_food_advice(food_item, user_message)
+            
+            # Prepare health context for LLM
+            health_context = cls._prepare_health_context(user_profile)
+            
+            # Generate personalized recommendation using LLM
+            logger.info(f"🤖 [AGENT/HEALTH] Generating personalized recommendation for '{food_item}'")
+            
+            health_prompt = ChatPromptTemplate.from_template("""
+You are a knowledgeable nutrition and health advisor. A user is asking for advice about whether they should consume a specific food item based on their personal health profile.
+
+USER QUERY: {user_message}
+FOOD ITEM TO ANALYZE: {food_item}
+
+USER'S HEALTH PROFILE:
+{health_context}
+
+Please provide personalized advice considering:
+1. Any medical conditions that might be affected by this food
+2. Known allergies or dietary restrictions
+3. Nutritional goals and fitness objectives
+4. General health implications
+5. Suggested alternatives if the food is not recommended
+
+Your response should be:
+- Friendly and conversational (like talking to a health-conscious friend)
+- Specific to their health profile (mention relevant conditions/goals)
+- Practical and actionable
+- Include brief reasoning for your recommendation
+- Suggest healthier alternatives if needed
+- Maximum 200 words
+
+Format your response as: "Based on your health profile, [recommendation and reasoning]"
+""")
+            
+            health_input = {
+                "user_message": user_message,
+                "food_item": food_item,
+                "health_context": health_context
+            }
+            
+            health_prompt_formatted = health_prompt.format(**health_input)
+            health_response = cls.llm.invoke(health_prompt_formatted)
+            recommendation = health_response.content.strip()
+            
+            logger.info(f"✅ [AGENT/HEALTH] Generated personalized recommendation for user {user_id}")
+            
+            return {
+                "success": True,
+                "food_item": food_item,
+                "recommendation": recommendation,
+                "user_has_profile": True,
+                "health_factors_considered": cls._get_considered_factors(user_profile)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [AGENT/HEALTH] Error analyzing food for health: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "recommendation": "I'm having trouble accessing your health information right now. Please consult with a healthcare professional for personalized advice."
+            }
+    
+    @classmethod
+    async def _generate_general_food_advice(cls, food_item: str, user_message: str) -> Dict[str, Any]:
+        """Generate general food advice when user profile is not available."""
+        try:
+            cls._initialize_llm()
+            
+            general_prompt = ChatPromptTemplate.from_template("""
+You are a knowledgeable nutrition advisor. A user is asking for advice about a food item, but you don't have access to their specific health profile.
+
+USER QUERY: {user_message}
+FOOD ITEM: {food_item}
+
+Provide general nutritional advice about this food item, including:
+1. General nutritional benefits and concerns
+2. Who might want to avoid this food (common conditions/allergies)
+3. General health considerations
+4. Typical portion recommendations
+5. Healthier preparation methods if applicable
+
+Keep your response:
+- Friendly and informative
+- General (not personalized to specific health conditions)
+- Practical and balanced
+- Maximum 150 words
+
+Start with: "Here's some general advice about {food_item}:"
+""")
+            
+            general_input = {
+                "user_message": user_message,
+                "food_item": food_item
+            }
+            
+            general_prompt_formatted = general_prompt.format(**general_input)
+            general_response = cls.llm.invoke(general_prompt_formatted)
+            advice = general_response.content.strip()
+            
+            return {
+                "success": True,
+                "food_item": food_item,
+                "recommendation": advice,
+                "user_has_profile": False,
+                "note": "For personalized advice based on your health conditions and goals, please complete your health profile."
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [AGENT/HEALTH] Error generating general food advice: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "recommendation": "I'm having trouble providing advice right now. Please consult with a healthcare professional for guidance."
+            }
+    
+    @classmethod
+    def _prepare_health_context(cls, user_profile) -> str:
+        """Prepare a formatted health context string from user profile."""
+        context_parts = []
+        
+        # Basic demographics
+        if user_profile.gender:
+            context_parts.append(f"Gender: {user_profile.gender.value}")
+        
+        if user_profile.date_of_birth:
+            from datetime import date
+            age = date.today().year - user_profile.date_of_birth.year
+            context_parts.append(f"Age: {age} years")
+        
+        if user_profile.height_cm and user_profile.weight_kg:
+            # Calculate BMI
+            height_m = float(user_profile.height_cm) / 100
+            weight_kg = float(user_profile.weight_kg)
+            bmi = weight_kg / (height_m ** 2)
+            context_parts.append(f"Height: {user_profile.height_cm}cm, Weight: {user_profile.weight_kg}kg (BMI: {bmi:.1f})")
+        
+        # Health conditions
+        if user_profile.medical_conditions:
+            conditions = [str(condition) for condition in user_profile.medical_conditions if condition]
+            if conditions:
+                context_parts.append(f"Medical Conditions: {', '.join(conditions)}")
+        
+        # Allergies
+        if user_profile.allergies:
+            allergies = [str(allergy) for allergy in user_profile.allergies if allergy]
+            if allergies:
+                context_parts.append(f"Allergies: {', '.join(allergies)}")
+        
+        # Dietary restrictions
+        if user_profile.dietary_restrictions:
+            restrictions = [str(restriction) for restriction in user_profile.dietary_restrictions if restriction]
+            if restrictions:
+                context_parts.append(f"Dietary Restrictions: {', '.join(restrictions)}")
+        
+        # Fitness goals
+        if user_profile.fitness_goals:
+            goals = [str(goal) for goal in user_profile.fitness_goals if goal]
+            if goals:
+                context_parts.append(f"Fitness Goals: {', '.join(goals)}")
+        
+        # Taste preferences
+        if user_profile.taste_preferences:
+            preferences = [str(pref) for pref in user_profile.taste_preferences if pref]
+            if preferences:
+                context_parts.append(f"Taste Preferences: {', '.join(preferences)}")
+        
+        # Cuisine interests
+        if user_profile.cuisine_interests:
+            cuisines = [str(cuisine) for cuisine in user_profile.cuisine_interests if cuisine]
+            if cuisines:
+                context_parts.append(f"Preferred Cuisines: {', '.join(cuisines)}")
+        
+        if not context_parts:
+            return "No specific health information available in profile."
+        
+        return "\n".join([f"- {part}" for part in context_parts])
+    
+    @classmethod
+    def _get_considered_factors(cls, user_profile) -> List[str]:
+        """Get a list of health factors that were considered in the recommendation."""
+        factors = []
+        
+        if user_profile.medical_conditions:
+            factors.append("Medical conditions")
+        if user_profile.allergies:
+            factors.append("Known allergies")
+        if user_profile.dietary_restrictions:
+            factors.append("Dietary restrictions")
+        if user_profile.fitness_goals:
+            factors.append("Fitness goals")
+        if user_profile.height_cm and user_profile.weight_kg:
+            factors.append("BMI and body composition")
+        
+        return factors if factors else ["General health guidelines"]

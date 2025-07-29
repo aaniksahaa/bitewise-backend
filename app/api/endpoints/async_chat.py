@@ -337,7 +337,8 @@ async def send_chat_message(
             user_message=chat_request.message,
             conversation_context=None,  # Could add conversation history here
             attachments=chat_request.attachments,
-            db=db
+            db=db,
+            current_user_id=current_user.id
         )
         
         api_logger.success("AI response generated", "AI", 
@@ -653,7 +654,8 @@ async def send_chat_message_with_images(
         user_message=message,
         conversation_context=None,
         attachments=agent_attachments,
-        db=db
+        db=db,
+        current_user_id=current_user.id
     )
     
     # Get default model for cost calculation
