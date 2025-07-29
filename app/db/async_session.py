@@ -112,20 +112,24 @@ class AsyncDatabaseManager:
             max_overflow = settings.ASYNC_DB_MAX_OVERFLOW
             pool_timeout = settings.ASYNC_DB_POOL_TIMEOUT
             pool_recycle = settings.ASYNC_DB_POOL_RECYCLE
+            command_timeout = settings.ASYNC_DB_COMMAND_TIMEOUT
+            statement_timeout = str(settings.ASYNC_DB_STATEMENT_TIMEOUT)
             
             # Adjust pool parameters based on environment
             if settings.ENVIRONMENT == "production":
                 # Production optimizations
                 pool_size = max(pool_size, 10)  # Minimum 10 connections for production
                 max_overflow = max(max_overflow, 20)  # Allow burst capacity
-                pool_timeout = 60  # Longer timeout for production
+                pool_timeout = max(pool_timeout, 60)  # Ensure minimum timeout for production
+                command_timeout = max(command_timeout, 60)  # Ensure minimum command timeout
             elif settings.ENVIRONMENT == "development":
                 # Development optimizations
                 pool_size = min(pool_size, 5)  # Limit connections for development
                 max_overflow = min(max_overflow, 5)  # Limit overflow for development
             
             logger.info(f"Pool configuration - Size: {pool_size}, Max Overflow: {max_overflow}, "
-                       f"Timeout: {pool_timeout}s, Recycle: {pool_recycle}s")
+                       f"Pool Timeout: {pool_timeout}s, Command Timeout: {command_timeout}s, "
+                       f"Statement Timeout: {statement_timeout}ms, Recycle: {pool_recycle}s")
             
             # Create async engine with optimized configuration
             self.async_engine = create_async_engine(
@@ -140,10 +144,10 @@ class AsyncDatabaseManager:
                 connect_args={
                     "server_settings": {
                         "application_name": "bitewise_backend_async",
-                        "statement_timeout": "300000",  # 5 minutes statement timeout
+                        "statement_timeout": statement_timeout,  # Configured statement timeout
                         "idle_in_transaction_session_timeout": "600000",  # 10 minutes idle timeout
                     },
-                    "command_timeout": 60,  # asyncpg command timeout
+                    "command_timeout": command_timeout,  # Configured asyncpg command timeout
                 }
             )
             
