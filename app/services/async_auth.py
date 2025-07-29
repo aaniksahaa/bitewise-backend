@@ -438,6 +438,14 @@ async def get_current_user_async(
     return await AsyncAuthService.get_current_user(db, token)
 
 
+async def get_current_user_with_db_async(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_async_db)
+) -> User:
+    """Get the current authenticated user from the token with explicit db session (async version)."""
+    return await AsyncAuthService.get_current_user(db, token)
+
+
 async def get_current_active_user_async(
     current_user: User = Depends(get_current_user_async)
 ) -> User:
@@ -448,3 +456,71 @@ async def get_current_active_user_async(
             detail="Inactive user",
         )
     return current_user
+
+
+async def get_current_active_user_with_db_async(
+    current_user: User = Depends(get_current_user_with_db_async)
+) -> User:
+    """Check if the current user is active with explicit db session (async version)."""
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
+    return current_user
+
+
+async def validate_token_only(token: str = Depends(oauth2_scheme)) -> TokenPayload:
+    """
+    Validate JWT token without database access.
+    
+    This allows us to fail fast on invalid tokens before creating database sessions.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+        token_data = TokenPayload(**payload)
+        
+        if datetime.fromtimestamp(token_data.exp) < datetime.utcnow():
+            raise credentials_exception
+            
+        return token_data
+            
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+
+async def get_current_user_validated_token(
+    token_data: TokenPayload = Depends(validate_token_only),
+    db: AsyncSession = Depends(get_async_db)
+) -> User:
+    """Get current user with pre-validated token and database session."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    stmt = select(User).where(User.id == int(token_data.sub))
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
+    if user is None:
+        raise credentials_exception
+        
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
+        
+    return user

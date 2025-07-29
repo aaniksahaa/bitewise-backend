@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.db.async_session import get_async_db
-from app.services.async_auth import get_current_active_user_async
+from app.services.async_auth import get_current_active_user_async, get_current_user_validated_token
 from app.services.async_intake import async_intake_service
 from app.schemas.intake import (
     IntakeCreate, 
@@ -109,8 +109,8 @@ async def get_intakes_by_period(
 
 @router.get("/today", response_model=IntakeListResponse)
 async def get_today_intakes(
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: User = Depends(get_current_user_validated_token),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get all intakes from the last 24 hours for the current user."""
     return await async_intake_service.get_today_intakes(

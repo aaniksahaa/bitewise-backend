@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.user import User
 from app.schemas.user_profile import UserProfileCreate, UserProfileResponse, UserProfileUpdate
-from app.services.async_auth import get_current_active_user_async
+from app.services.async_auth import get_current_active_user_async, get_current_user_validated_token
 from app.services.async_user_profile import AsyncUserProfileService
 from app.services.supabase_storage import SupabaseStorageService
 
@@ -36,8 +36,8 @@ async def create_profile(
 
 @router.get("/me", response_model=UserProfileResponse)
 async def get_my_profile(
-    db: AsyncSession = Depends(get_async_db), 
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: User = Depends(get_current_user_validated_token),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get the current user's profile."""
     return await AsyncUserProfileService.get_profile(db=db, user_id=current_user.id)
