@@ -10,6 +10,7 @@ router = APIRouter()
 
 
 @router.get("/", response_model=IngredientListResponse)
+@router.get("", response_model=IngredientListResponse)  # Handle requests without trailing slash
 async def get_ingredients(
     search: Optional[str] = Query(None, description="Search term for ingredient name"),
     page: int = Query(1, ge=1, description="Page number"),

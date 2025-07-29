@@ -59,6 +59,7 @@ async def search_dishes_by_name(
 
 
 @router.get("/", response_model=DishListResponse)
+@router.get("", response_model=DishListResponse)  # Handle requests without trailing slash
 async def get_dishes(
     search: Optional[str] = Query(None, description="Search term for name, description, or cuisine"),
     cuisine: Optional[str] = Query(None, description="Filter by cuisine"),

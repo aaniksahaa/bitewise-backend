@@ -71,6 +71,7 @@ async def create_intake_by_name(
 
 
 @router.get("/", response_model=IntakeListResponse)
+@router.get("", response_model=IntakeListResponse)  # Handle requests without trailing slash
 async def get_my_intakes(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
