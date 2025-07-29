@@ -187,14 +187,15 @@ class AuthService:
         if not otp_record:
             return None
         
+        # Store user_id before committing to avoid lazy loading issues
+        user_id = otp_record.user_id
+        
         # Mark OTP as used
         otp_record.is_used = True
         await db.commit()
         
-        # Return the associated user
-        # return await db.query(User).filter(User.id == otp_record.user_id).first()
-        # modified for asyncio
-        return (await db.execute(select(User).where(User.id == otp_record.user_id))).scalars().first()
+        # Return the associated user using the stored user_id
+        return (await db.execute(select(User).where(User.id == user_id))).scalars().first()
 
     @classmethod
     async def verify_login_request_otp(
@@ -230,14 +231,15 @@ class AuthService:
         if not otp_record:
             return None
         
+        # Store user_id before committing to avoid lazy loading issues
+        user_id = otp_record.user_id
+        
         # Mark OTP as used
         otp_record.is_used = True
         await db.commit()
         
-        # Return the associated user
-        # return await db.query(User).filter(User.id == otp_record.user_id).first()
-        # modified for asyncio
-        return (await db.execute(select(User).where(User.id == otp_record.user_id))).scalars().first()
+        # Return the associated user using the stored user_id
+        return (await db.execute(select(User).where(User.id == user_id))).scalars().first()
 
     @classmethod
     def create_access_token(cls, user_id: int, expires_delta: timedelta = None) -> str:
