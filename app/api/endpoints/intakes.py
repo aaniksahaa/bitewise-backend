@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional
+from pydantic import BaseModel, Field
 
-from app.db.session import get_db
-from app.services.auth import get_current_active_user
-from app.services.intake import IntakeService
+from app.db.async_session import get_async_db
+from app.services.async_auth import get_current_active_user_async, get_current_user_validated_token
+from app.services.async_intake import async_intake_service
 from app.schemas.intake import (
     IntakeCreate, 
     IntakeCreateByName,
@@ -18,14 +19,37 @@ from app.models.user import User
 router = APIRouter()
 
 
+class WaterIntakeCreate(BaseModel):
+    """Schema for water-only intake logging."""
+    water_ml: int = Field(..., gt=0, description="Water consumed in milliliters")
+    intake_time: datetime = Field(default_factory=datetime.now, description="Time when water was consumed")
+
+
+@router.post("/water", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
+async def log_water_intake(
+    water_data: WaterIntakeCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
+):
+    """Log water intake without requiring a dish."""
+    # Create a special intake record for water with a dummy dish_id of 0
+    # We'll handle this specially in the service
+    return await async_intake_service.create_water_intake(
+        db=db,
+        water_ml=water_data.water_ml,
+        intake_time=water_data.intake_time,
+        current_user_id=current_user.id
+    )
+
+
 @router.post("/", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
 async def create_intake(
     intake_data: IntakeCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Create a new intake record."""
-    return IntakeService.create_intake(
+    return await async_intake_service.create_intake(
         db=db, 
         intake_data=intake_data, 
         current_user_id=current_user.id
@@ -35,11 +59,11 @@ async def create_intake(
 @router.post("/by-name", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
 async def create_intake_by_name(
     intake_data: IntakeCreateByName,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Create a new intake record using dish name instead of dish ID."""
-    return IntakeService.create_intake_by_name(
+    return await async_intake_service.create_intake_by_name(
         db=db, 
         intake_data=intake_data, 
         current_user_id=current_user.id
@@ -47,14 +71,15 @@ async def create_intake_by_name(
 
 
 @router.get("/", response_model=IntakeListResponse)
+@router.get("", response_model=IntakeListResponse)  # Handle requests without trailing slash
 async def get_my_intakes(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get all intakes for the current user with pagination."""
-    return IntakeService.get_user_intakes(
+    return await async_intake_service.get_user_intakes(
         db=db,
         current_user_id=current_user.id,
         page=page,
@@ -68,11 +93,11 @@ async def get_intakes_by_period(
     end_time: datetime = Query(..., description="End of the time period (ISO format)"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get intakes for the current user between specific date/time periods."""
-    return IntakeService.get_intakes_by_period(
+    return await async_intake_service.get_intakes_by_period(
         db=db,
         current_user_id=current_user.id,
         start_time=start_time,
@@ -84,11 +109,11 @@ async def get_intakes_by_period(
 
 @router.get("/today", response_model=IntakeListResponse)
 async def get_today_intakes(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user_validated_token),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get all intakes from the last 24 hours for the current user."""
-    return IntakeService.get_today_intakes(
+    return await async_intake_service.get_today_intakes(
         db=db,
         current_user_id=current_user.id
     )
@@ -96,11 +121,11 @@ async def get_today_intakes(
 
 @router.get("/calendar-day", response_model=IntakeListResponse)
 async def get_calendar_day_intakes(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get all intakes for the current calendar day (00:00 to 23:59 today) for the current user."""
-    return IntakeService.get_calendar_day_intakes(
+    return await async_intake_service.get_calendar_day_intakes(
         db=db,
         current_user_id=current_user.id
     )
@@ -109,11 +134,11 @@ async def get_calendar_day_intakes(
 @router.get("/{intake_id}", response_model=IntakeResponse)
 async def get_intake(
     intake_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get a specific intake by ID (only for the current user)."""
-    intake = IntakeService.get_intake_by_id(
+    intake = await async_intake_service.get_intake_by_id(
         db=db, 
         intake_id=intake_id, 
         current_user_id=current_user.id
@@ -130,11 +155,11 @@ async def get_intake(
 async def update_intake(
     intake_id: int,
     intake_update: IntakeUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Update an intake (only for the current user)."""
-    intake = IntakeService.update_intake(
+    intake = await async_intake_service.update_intake(
         db=db,
         intake_id=intake_id,
         intake_update=intake_update,
@@ -151,11 +176,11 @@ async def update_intake(
 @router.delete("/{intake_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_intake(
     intake_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Delete an intake (only for the current user)."""
-    success = IntakeService.delete_intake(
+    success = await async_intake_service.delete_intake(
         db=db,
         intake_id=intake_id,
         current_user_id=current_user.id

@@ -1,46 +1,58 @@
+"""
+Legacy synchronous database session module.
+
+This module is maintained for backward compatibility with existing code
+that hasn't been migrated to async yet. It redirects to the async session
+module and provides compatibility functions.
+
+DEPRECATED: Use async_session.py instead for all new code.
+"""
+
+import logging
+from typing import Generator
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 
 from app.core.config import settings
+from app.db.async_session import get_async_db_manager_sync
 
-print("\n")
+logger = logging.getLogger(__name__)
 
-print("--------------------------------")
-print("CONFIGURATION")
-print("--------------------------------")
+# Issue a deprecation warning
+logger.warning(
+    "DEPRECATED: Using synchronous database session. "
+    "Please migrate to async_session.py for better performance."
+)
 
-print("ENVIRONMENT =", settings.ENVIRONMENT)
+# Create synchronous engine from the async URL
+# This is only for compatibility with existing code
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10
+)
 
-if settings.ENVIRONMENT == "development":
-    print("Using LOCAL DATABASE URL")
-    db_url = settings.LOCAL_DATABASE_URL
-else:
-    print("Using PRODUCTION DATABASE URL")
-    db_url = settings.DATABASE_URL
-
-# Replace any escaped colons in the URL
-if db_url:
-    db_url = db_url.replace("\\x3a", ":")
-
-print("DB_URL =", db_url)
-
-print("\n")
-
-engine = create_engine(db_url, pool_pre_ping=True)
+# Create synchronous session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-
-# Dependency to get DB session
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     """
-    Dependency for database session.
+    DEPRECATED: Get a synchronous database session.
+    
+    This function is maintained for backward compatibility.
+    New code should use get_async_db from async_session.py instead.
     
     Yields:
-        Session: Database session
+        Session: Synchronous database session
     """
+    logger.warning(
+        "DEPRECATED: Using synchronous get_db(). "
+        "Please migrate to get_async_db() for better performance."
+    )
+    
     db = SessionLocal()
     try:
         yield db
     finally:
-        db.close() 
+        db.close()

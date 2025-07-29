@@ -59,6 +59,40 @@ class Settings(BaseSettings):
     LOCAL_DATABASE_URL: str = os.getenv("LOCAL_DATABASE_URL", "postgresql://bitewise:your_password@localhost:5432/bitewise_dev")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     
+    # Async Database Configuration
+    @property
+    def async_database_url(self) -> str:
+        """Get async database URL based on environment."""
+        if self.ENVIRONMENT == "development":
+            base_url = self.LOCAL_DATABASE_URL
+        else:
+            base_url = self.DATABASE_URL
+        
+        # Convert postgresql:// to postgresql+asyncpg://
+        if base_url.startswith("postgresql://"):
+            return base_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif base_url.startswith("postgres://"):
+            return base_url.replace("postgres://", "postgresql+asyncpg://", 1)
+        else:
+            return base_url
+    
+
+    
+    # Async Connection Pool Configuration - Optimized for Production
+    ASYNC_DB_POOL_SIZE: int = int(os.getenv("ASYNC_DB_POOL_SIZE", "20"))
+    ASYNC_DB_MAX_OVERFLOW: int = int(os.getenv("ASYNC_DB_MAX_OVERFLOW", "30"))  # Increased for burst capacity
+    ASYNC_DB_POOL_RECYCLE: int = int(os.getenv("ASYNC_DB_POOL_RECYCLE", "3600"))  # 1 hour
+    ASYNC_DB_POOL_PRE_PING: bool = os.getenv("ASYNC_DB_POOL_PRE_PING", "true").lower() == "true"
+    ASYNC_DB_ECHO: bool = os.getenv("ASYNC_DB_ECHO", "false").lower() == "true"
+    ASYNC_DB_POOL_TIMEOUT: int = int(os.getenv("ASYNC_DB_POOL_TIMEOUT", "30"))  # Connection timeout
+    ASYNC_DB_COMMAND_TIMEOUT: int = int(os.getenv("ASYNC_DB_COMMAND_TIMEOUT", "60"))  # Query timeout
+    ASYNC_DB_STATEMENT_TIMEOUT: int = int(os.getenv("ASYNC_DB_STATEMENT_TIMEOUT", "300000"))  # 5 minutes
+    ASYNC_DB_IDLE_TIMEOUT: int = int(os.getenv("ASYNC_DB_IDLE_TIMEOUT", "600000"))  # 10 minutes
+    
+    # Connection Pool Health Monitoring
+    ASYNC_DB_HEALTH_CHECK_INTERVAL: int = int(os.getenv("ASYNC_DB_HEALTH_CHECK_INTERVAL", "300"))  # 5 minutes
+    ASYNC_DB_METRICS_RESET_INTERVAL: int = int(os.getenv("ASYNC_DB_METRICS_RESET_INTERVAL", "3600"))  # 1 hour
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

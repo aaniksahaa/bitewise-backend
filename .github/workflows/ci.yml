@@ -36,13 +36,22 @@ jobs:
     env:
       # Required environment variables for tests
       SECRET_KEY: "test-secret-key-for-ci-only"
-      ENVIRONMENT: "development"  # Use development so it picks up LOCAL_DATABASE_URL
+      ENVIRONMENT: "testing"
       LOCAL_DATABASE_URL: "sqlite:///./test.db"
-      DATABASE_URL: "sqlite:///./test.db"  # Fallback in case needed
-      OPENAI_API_KEY: "test-key"
+      DATABASE_URL: "sqlite:///./test.db"
+      # API keys for tests (using dummy values)
+      OPENAI_API_KEY: "sk-test-key-for-ci-only"
       SUPABASE_URL: "https://test.supabase.co"
-      SUPABASE_KEY: "test-key"
-      RESEND_API_KEY: "test-key"
+      SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test-key-for-ci"
+      SUPABASE_BUCKET_NAME: "test-bucket"
+      RESEND_API_KEY: "re_test_key"
+      YOUTUBE_V3_API_KEY: "test-youtube-key"
+      # OAuth (dummy values for CI)
+      GOOGLE_CLIENT_ID: "test-client-id.apps.googleusercontent.com"
+      GOOGLE_CLIENT_SECRET: "test-client-secret"
+      GOOGLE_CALLBACK_URL: "http://localhost:8000/api/v1/auth/google/callback"
+      # Frontend
+      FRONTEND_URL: "http://localhost:3000"
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
@@ -60,13 +69,21 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        # Install additional test dependencies if needed
+        pip install pytest-asyncio pytest-cov pytest-mock
     - name: Create test database directory
       run: |
         mkdir -p ./tests
         chmod 755 ./tests
-    - name: Test with pytest
+    - name: Run unit tests
       run: |
-        pytest tests/ -v --tb=short --disable-warnings
+        pytest tests/unit/ -v --tb=short --disable-warnings
+    - name: Run integration tests (skip external API tests)
+      run: |
+        pytest tests/integration/ -v --tb=short --disable-warnings -m "not slow"
+    - name: Run configuration tests
+      run: |
+        pytest tests/test_*.py -v --tb=short --disable-warnings
     - name: Clean up test files
       if: always()
       run: |

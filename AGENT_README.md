@@ -1,5 +1,5 @@
 # BiteWise AI Agent
-
+ 
 ## Overview
 
 The BiteWise AI Agent is a simple but powerful conversational AI that can help users with nutrition and health questions while providing access to specific tools for dish searching and intake logging.

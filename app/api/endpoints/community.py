@@ -2,6 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.async_session import get_async_db
+from app.services.async_auth import AsyncAuthService, get_current_active_user_async
+from app.services.async_community import AsyncCommunityService
+from app.models.user import User
 
 router = APIRouter()
 
@@ -43,44 +49,78 @@ class StreakResponse(BaseModel):
     last_updated: datetime
 
 @router.post("/posts", response_model=PostResponse)
-async def create_post(post: PostCreate):
+async def create_post(
+    post: PostCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
+):
     """Create a new community post."""
-    return PostResponse(
-        post_id=1,
+    created_post = await AsyncCommunityService.create_post(
+        db=db,
+        user_id=current_user.id,
         title=post.title,
-        created_at=datetime.now()
+        content=post.content,
+        dish_id=post.dish_id,
+        tags=post.tags
+    )
+    
+    return PostResponse(
+        post_id=created_post.id,
+        title=created_post.title,
+        created_at=created_post.created_at
     )
 
 @router.get("/posts", response_model=PostListResponse)
 async def get_community_feed(
     limit: int = 20,
     offset: int = 0,
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get community feed."""
+    posts, total_count = await AsyncCommunityService.get_community_feed(
+        db=db,
+        limit=limit,
+        offset=offset,
+        tags=tags
+    )
+    
+    post_responses = []
+    for post in posts:
+        post_responses.append(PostDetailResponse(
+            post_id=post.id,
+            user_id=post.user_id,
+            username=post.user.username if post.user else "Unknown",
+            title=post.title,
+            content=post.content,
+            dish_id=post.dish_id,
+            dish_name=post.dish.name if post.dish else None,
+            tags=post.tags or [],
+            created_at=post.created_at
+        ))
+    
     return PostListResponse(
-        posts=[
-            PostDetailResponse(
-                post_id=1,
-                user_id=1,
-                username="Dummy User",
-                title="Dummy Post",
-                content="This is a dummy post content",
-                dish_id=1,
-                dish_name="Dummy Dish",
-                tags=["dummy", "test"],
-                created_at=datetime.now()
-            )
-        ],
-        total_count=1
+        posts=post_responses,
+        total_count=total_count
     )
 
 @router.post("/streaks", response_model=StreakResponse)
-async def update_streak(streak: StreakUpdate):
+async def update_streak(
+    streak: StreakUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
+):
     """Update user's streak."""
-    return StreakResponse(
-        streak_id=1,
+    streak_data = await AsyncCommunityService.update_user_streak(
+        db=db,
+        user_id=current_user.id,
         streak_type=streak.streak_type,
-        current_count=5 if streak.increment else 0,
-        last_updated=datetime.now()
+        increment=streak.increment
+    )
+    
+    return StreakResponse(
+        streak_id=streak_data["streak_id"],
+        streak_type=streak_data["streak_type"],
+        current_count=streak_data["current_count"],
+        last_updated=streak_data["last_updated"]
     ) 

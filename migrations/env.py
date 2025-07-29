@@ -33,10 +33,20 @@ target_metadata = Base.metadata
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
-def get_url():
+def get_sync_url():
+    """Get synchronous database URL for Alembic migrations."""
     if settings.ENVIRONMENT == "development":
-        return settings.LOCAL_DATABASE_URL
-    return settings.DATABASE_URL
+        base_url = settings.LOCAL_DATABASE_URL
+    else:
+        base_url = settings.DATABASE_URL
+    
+    # Ensure we use synchronous URL for Alembic (remove +asyncpg if present)
+    if base_url.startswith("postgresql+asyncpg://"):
+        return base_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    elif base_url.startswith("postgres+asyncpg://"):
+        return base_url.replace("postgres+asyncpg://", "postgresql://", 1)
+    else:
+        return base_url
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -50,7 +60,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = get_url()
+    url = get_sync_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -70,7 +80,7 @@ def run_migrations_online() -> None:
 
     """
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = get_url()
+    configuration["sqlalchemy.url"] = get_sync_url()
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",

@@ -1,11 +1,25 @@
 """
 Search utilities for fuzzy matching and scoring of dish names.
+
+DEPRECATED: This module contains synchronous database code.
+Please use async_search.py instead for all new code.
 """
 import re
+import logging
 from typing import List, Tuple, Dict, Any
 from fuzzywuzzy import fuzz, process
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.dish import Dish
+
+logger = logging.getLogger(__name__)
+
+# Issue a deprecation warning
+logger.warning(
+    "DEPRECATED: Using synchronous search utilities. "
+    "Please migrate to async_search.py for better performance."
+)
 
 
 class SearchUtils:

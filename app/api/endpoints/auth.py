@@ -4,10 +4,10 @@ from typing import Any, Dict, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi_sso.sso.google import GoogleSSO
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.async_session import get_async_db
 from app.models.user import User
 from app.schemas.auth import (
     EmailVerify,
@@ -28,7 +28,7 @@ from app.schemas.auth import (
     GoogleLoginUrlResponse,
     DirectLoginResponse,
 )
-from app.services.auth import AuthService, get_current_active_user
+from app.services.async_auth import AsyncAuthService, get_current_active_user_async
 
 router = APIRouter()
 
@@ -42,13 +42,13 @@ google_sso = GoogleSSO(
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED, response_model=UserRegisterResponse)
-async def register(user_data: UserRegister, db: Session = Depends(get_db)) -> Any:
+async def register(user_data: UserRegister, db: AsyncSession = Depends(get_async_db)) -> Any:
     """
     Register a new user with email and password.
     An OTP verification email will be sent to the provided email address.
     """
     # Check if email already exists
-    existing_user = AuthService.get_user_by_email(db, user_data.email)
+    existing_user = await AsyncAuthService.get_user_by_email(db, user_data.email)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -60,14 +60,14 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)) -> An
         email=user_data.email,
         username=user_data.username,
         full_name=user_data.full_name,
-        hashed_password=AuthService.get_password_hash(user_data.password),
+        hashed_password=AsyncAuthService.get_password_hash(user_data.password),
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
 
     # Create and send OTP
-    otp, _ = AuthService.create_otp(
+    otp, _ = await AsyncAuthService.create_otp(
         db, user.id, user.email, "register", expires_in=300
     )
     from app.services.email import EmailService
@@ -82,11 +82,11 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)) -> An
 
 
 @router.post("/verify-email", response_model=EmailVerifyResponse)
-async def verify_email(verification_data: EmailVerify, db: Session = Depends(get_db)) -> Any:
+async def verify_email(verification_data: EmailVerify, db: AsyncSession = Depends(get_async_db)) -> Any:
     """
     Verify the user's email address using the OTP sent to their email.
     """
-    user = AuthService.verify_otp(
+    user = await AsyncAuthService.verify_otp(
         db, verification_data.email, verification_data.otp, "register"
     )
     if not user:
@@ -98,10 +98,10 @@ async def verify_email(verification_data: EmailVerify, db: Session = Depends(get
     # Activate and verify the user
     user.is_active = True
     user.is_verified = True
-    db.commit()
+    await db.commit()
 
     # Generate access token
-    access_token = AuthService.create_access_token(user.id)
+    access_token = AsyncAuthService.create_access_token(user.id)
     
     return EmailVerifyResponse(
         message="Email verified successfully",
@@ -112,14 +112,14 @@ async def verify_email(verification_data: EmailVerify, db: Session = Depends(get
 
 
 @router.post("/login", response_model=Union[LoginResponse, DirectLoginResponse])
-async def login(login_data: UserLogin, db: Session = Depends(get_db)) -> Any:
+async def login(login_data: UserLogin, db: AsyncSession = Depends(get_async_db)) -> Any:
     """
     Authenticate a user with email and password.
     If the user hasn't logged in for more than 7 days, an OTP will be sent for verification.
     Otherwise, return access tokens directly.
     """
-    user = AuthService.get_user_by_email(db, login_data.email)
-    if not user or not AuthService.verify_password(
+    user = await AsyncAuthService.get_user_by_email(db, login_data.email)
+    if not user or not AsyncAuthService.verify_password(
         login_data.password, user.hashed_password or ""
     ):
         raise HTTPException(
@@ -134,18 +134,18 @@ async def login(login_data: UserLogin, db: Session = Depends(get_db)) -> Any:
         )
 
     # Refresh user from database to get the most recent last_login_at value
-    db.refresh(user)
+    await db.refresh(user)
 
     # Check if OTP is required based on last login time
-    otp_required = AuthService.is_otp_required_for_login(user)
+    otp_required = AsyncAuthService.is_otp_required_for_login(user)
     
     if not otp_required:
         # User has logged in recently (within 7 days), provide tokens directly
-        access_token = AuthService.create_access_token(user.id)
-        refresh_token = AuthService.create_refresh_token(db, user.id)
+        access_token = AsyncAuthService.create_access_token(user.id)
+        refresh_token = await AsyncAuthService.create_refresh_token(db, user.id)
         
         # Update last login time
-        AuthService.update_last_login(db, user.id)
+        await AsyncAuthService.update_last_login(db, user.id)
         
         return DirectLoginResponse(
             access_token=access_token,
@@ -158,7 +158,7 @@ async def login(login_data: UserLogin, db: Session = Depends(get_db)) -> Any:
         )
     else:
         # User hasn't logged in for more than 7 days, require OTP verification
-        otp, expires_at = AuthService.create_otp(
+        otp, expires_at = await AsyncAuthService.create_otp(
             db, user.id, user.email, "login", expires_in=300
         )
         
@@ -175,12 +175,12 @@ async def login(login_data: UserLogin, db: Session = Depends(get_db)) -> Any:
 
 
 @router.post("/verify-login", response_model=LoginVerifyResponse)
-async def verify_login(verification_data: LoginVerify, db: Session = Depends(get_db)) -> Any:
+async def verify_login(verification_data: LoginVerify, db: AsyncSession = Depends(get_async_db)) -> Any:
     """
     Verify the login OTP and return an access token upon successful verification.
     """
     user_id = verification_data.login_request_id
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = await AsyncAuthService.get_user_by_id(db, int(user_id))
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -188,7 +188,7 @@ async def verify_login(verification_data: LoginVerify, db: Session = Depends(get
         )
 
     # Verify OTP
-    otp_verification = AuthService.verify_otp(
+    otp_verification = await AsyncAuthService.verify_otp(
         db, user.email, verification_data.otp, "login"
     )
     if not otp_verification:
@@ -198,11 +198,11 @@ async def verify_login(verification_data: LoginVerify, db: Session = Depends(get
         )
 
     # Generate tokens
-    access_token = AuthService.create_access_token(user.id)
-    refresh_token = AuthService.create_refresh_token(db, user.id)
+    access_token = AsyncAuthService.create_access_token(user.id)
+    refresh_token = await AsyncAuthService.create_refresh_token(db, user.id)
     
     # Update last login time after successful OTP verification
-    AuthService.update_last_login(db, user.id)
+    await AsyncAuthService.update_last_login(db, user.id)
 
     return LoginVerifyResponse(
         access_token=access_token,
@@ -267,7 +267,7 @@ async def google_login(
 @router.get("/google/callback")
 async def google_callback_get(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     Handles the Google OAuth callback via GET redirect from Google.
@@ -327,7 +327,7 @@ async def google_callback_get(
         )
 
 
-async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResponse:
+async def _process_google_user(google_user: Any, db: AsyncSession) -> GoogleLoginResponse:
     """
     Process Google user data and create/update user in database.
     """
@@ -339,26 +339,26 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
         )
 
     # Check if user exists by OAuth provider and ID
-    user = AuthService.get_user_by_oauth(db, "google", google_user.id)
+    user = await AsyncAuthService.get_user_by_oauth(db, "google", google_user.id)
     is_new_user = False
     first_login = False
 
     if not user:
         # Check if a user already exists with this email but different provider
-        existing_user = AuthService.get_user_by_email(db, google_user.email)
+        existing_user = await AsyncAuthService.get_user_by_email(db, google_user.email)
         
         if existing_user:
             # Link Google account to existing user
             existing_user.oauth_provider = "google"
             existing_user.oauth_id = google_user.id
             existing_user.is_verified = True
-            db.commit()
+            await db.commit()
             user = existing_user
             first_login = False
         else:
             # Create new user with unique username handling
             base_username = google_user.email.split("@")[0]
-            username = AuthService.generate_unique_username(db, base_username)
+            username = await AsyncAuthService.generate_unique_username(db, base_username)
             
             is_new_user = True
             first_login = True
@@ -372,8 +372,8 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
                 is_verified=True,  # Google users are pre-verified
             )
             db.add(user)
-            db.commit()
-            db.refresh(user)
+            await db.commit()
+            await db.refresh(user)
 
             # Send welcome email for new users
             try:
@@ -390,14 +390,14 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
     # Ensure user is active and verified for OAuth users
     if not user.is_active:
         user.is_active = True
-        db.commit()
+        await db.commit()
     
     if not user.is_verified:
         user.is_verified = True
-        db.commit()
+        await db.commit()
 
     # Update last login time for Google OAuth users
-    AuthService.update_last_login(db, user.id)
+    await AsyncAuthService.update_last_login(db, user.id)
 
     # Check if profile is complete (has required fields)
     profile_complete = bool(
@@ -407,8 +407,8 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
     )
 
     # Generate YOUR app's JWT tokens (not Google's)
-    access_token_jwt = AuthService.create_access_token(user.id)
-    refresh_token = AuthService.create_refresh_token(db, user.id)
+    access_token_jwt = AsyncAuthService.create_access_token(user.id)
+    refresh_token = await AsyncAuthService.create_refresh_token(db, user.id)
 
     return GoogleLoginResponse(
         access_token=access_token_jwt,
@@ -427,12 +427,12 @@ async def _process_google_user(google_user: Any, db: Session) -> GoogleLoginResp
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    refresh_token_data: RefreshTokenRequest, db: Session = Depends(get_db)
+    refresh_token_data: RefreshTokenRequest, db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     Obtain a new access token using a refresh token.
     """
-    result = AuthService.refresh_access_token(db, refresh_token_data.refresh_token)
+    result = await AsyncAuthService.refresh_access_token(db, refresh_token_data.refresh_token)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -450,24 +450,24 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
     """
     Invalidate the current access token and associated refresh tokens.
     """
-    AuthService.revoke_all_refresh_tokens(db, current_user.id)
+    await AsyncAuthService.revoke_all_refresh_tokens(db, current_user.id)
     return {"message": "Successfully logged out"}
 
 
 @router.post("/reset-password/request", response_model=PasswordResetResponse)
 async def request_password_reset(
-    reset_data: PasswordResetRequest, db: Session = Depends(get_db)
+    reset_data: PasswordResetRequest, db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     Initiate a password reset by sending a reset link to the user's email.
     """
-    user = AuthService.get_user_by_email(db, reset_data.email)
+    user = await AsyncAuthService.get_user_by_email(db, reset_data.email)
     if not user:
         # Don't reveal whether the email exists for security
         return PasswordResetResponse(
@@ -477,10 +477,10 @@ async def request_password_reset(
         )
 
     # Create reset request and OTP
-    request_id, expires_at = AuthService.create_password_reset_request(
+    request_id, expires_at = await AsyncAuthService.create_password_reset_request(
         db, user.id, expires_in=900
     )
-    otp, _ = AuthService.create_otp(
+    otp, _ = await AsyncAuthService.create_otp(
         db, user.id, user.email, "reset-password", expires_in=900
     )
 
@@ -498,12 +498,12 @@ async def request_password_reset(
 
 @router.post("/reset-password/complete", response_model=PasswordResetCompleteResponse)
 async def complete_password_reset(
-    reset_data: PasswordResetComplete, db: Session = Depends(get_db)
+    reset_data: PasswordResetComplete, db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     Complete the password reset process with the OTP and new password.
     """
-    user = AuthService.verify_password_reset_request(
+    user = await AsyncAuthService.verify_password_reset_request(
         db, reset_data.reset_request_id, reset_data.otp
     )
     if not user:
@@ -513,7 +513,7 @@ async def complete_password_reset(
         )
 
     # Update password
-    AuthService.update_password(db, user.id, reset_data.new_password)
+    await AsyncAuthService.update_password(db, user.id, reset_data.new_password)
 
     return PasswordResetCompleteResponse(message="Password reset successful")
 
@@ -523,7 +523,7 @@ async def complete_password_reset(
 async def login_for_access_token(
     username: str = Form(...),
     password: str = Form(...),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests.
@@ -532,8 +532,8 @@ async def login_for_access_token(
     from fastapi.security import OAuth2PasswordRequestForm
     from fastapi import Form
 
-    user = AuthService.get_user_by_email(db, username)
-    if not user or not AuthService.verify_password(password, user.hashed_password or ""):
+    user = await AsyncAuthService.get_user_by_email(db, username)
+    if not user or not AsyncAuthService.verify_password(password, user.hashed_password or ""):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -547,7 +547,7 @@ async def login_for_access_token(
         )
 
     # Generate tokens
-    access_token = AuthService.create_access_token(user.id)
+    access_token = AsyncAuthService.create_access_token(user.id)
     
     return Token(
         access_token=access_token,
@@ -559,20 +559,20 @@ async def login_for_access_token(
 @router.get("/debug/login-status")
 async def debug_login_status(
     email: str,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     Debug endpoint to check user's login status and OTP requirements.
     This is for debugging purposes only.
     """
-    user = AuthService.get_user_by_email(db, email)
+    user = await AsyncAuthService.get_user_by_email(db, email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
     
-    otp_required = AuthService.is_otp_required_for_login(user)
+    otp_required = AsyncAuthService.is_otp_required_for_login(user)
     
     return {
         "user_id": user.id,

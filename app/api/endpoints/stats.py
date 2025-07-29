@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, date, timedelta
 from typing import Optional
 
-from app.db.session import get_db
-from app.services.auth import get_current_active_user
-from app.services.stats import StatsService
+from app.db.async_session import get_async_db
+from app.services.async_auth import AsyncAuthService, get_current_active_user_async
+from app.services.async_stats import AsyncStatsService
 from app.schemas.stats import (
     StatsTimeRange, TimePeriod, SimpleTimeRange, TimeUnit, ComprehensiveStats, QuickStats,
     CalorieStats, MacronutrientStats, MicronutrientStats,
@@ -19,24 +19,24 @@ router = APIRouter()
 
 @router.get("/quick", response_model=QuickStats)
 async def get_quick_stats(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get quick statistics for dashboard display."""
-    return StatsService.calculate_quick_stats(db=db, user_id=current_user.id)
+    return await AsyncStatsService.calculate_quick_stats(db=db, user_id=current_user.id)
 
 
 @router.get("/comprehensive", response_model=ComprehensiveStats)
 async def get_comprehensive_stats(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get comprehensive statistics for a given time period."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_comprehensive_stats(
+    return await AsyncStatsService.calculate_simple_comprehensive_stats(
         db=db, 
         user_id=current_user.id, 
         simple_range=simple_range
@@ -47,13 +47,13 @@ async def get_comprehensive_stats(
 async def get_calorie_stats(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get detailed calorie intake statistics."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_calorie_stats(
+    return await AsyncStatsService.calculate_simple_calorie_stats(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -64,13 +64,13 @@ async def get_calorie_stats(
 async def get_macronutrient_stats(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get macronutrient distribution and trends statistics."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_macronutrient_stats(
+    return await AsyncStatsService.calculate_simple_macronutrient_stats(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -81,13 +81,13 @@ async def get_macronutrient_stats(
 async def get_micronutrient_stats(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get micronutrient intake statistics and deficiency alerts."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_micronutrient_stats(
+    return await AsyncStatsService.calculate_simple_micronutrient_stats(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -98,13 +98,13 @@ async def get_micronutrient_stats(
 async def get_consumption_pattern_stats(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get food consumption pattern statistics."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_consumption_patterns(
+    return await AsyncStatsService.calculate_simple_consumption_patterns(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -115,13 +115,13 @@ async def get_consumption_pattern_stats(
 async def get_progress_stats(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get health and fitness progress statistics."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_progress_stats(
+    return await AsyncStatsService.calculate_simple_progress_stats(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -132,13 +132,13 @@ async def get_progress_stats(
 async def get_nutrition_overview(
     unit: TimeUnit = Query(..., description="Time unit (hour, day, week, month, year)"),
     num: int = Query(..., ge=1, le=365, description="Number of time units (1-365)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get comprehensive nutrition overview including calories, macros, and micronutrients."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    return StatsService.calculate_simple_nutrition_overview(
+    return await AsyncStatsService.calculate_simple_nutrition_overview(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -149,13 +149,13 @@ async def get_nutrition_overview(
 async def get_trend_analysis(
     unit: TimeUnit = Query(default=TimeUnit.day, description="Time unit for trend analysis"),
     num: int = Query(default=30, ge=7, le=365, description="Number of time units to analyze"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get trend analysis for various metrics over time."""
     simple_range = SimpleTimeRange(unit=unit, num=num)
     
-    stats = StatsService.calculate_simple_comprehensive_stats(
+    stats = await AsyncStatsService.calculate_simple_comprehensive_stats(
         db=db,
         user_id=current_user.id,
         simple_range=simple_range
@@ -191,8 +191,8 @@ async def get_comprehensive_stats_legacy(
     start_date: date = Query(..., description="Start date for statistics calculation"),
     end_date: date = Query(..., description="End date for statistics calculation"),
     period: TimePeriod = Query(default=TimePeriod.daily, description="Data granularity"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get comprehensive statistics for a given time range (legacy endpoint)."""
     # Validate date range
@@ -216,7 +216,7 @@ async def get_comprehensive_stats_legacy(
         period=period
     )
     
-    return StatsService.calculate_comprehensive_stats(
+    return await AsyncStatsService.calculate_comprehensive_stats(
         db=db, 
         user_id=current_user.id, 
         time_range=time_range
@@ -226,8 +226,8 @@ async def get_comprehensive_stats_legacy(
 @router.get("/weekly-summary", response_model=ComprehensiveStats)
 async def get_weekly_summary(
     week_offset: int = Query(default=0, description="Weeks ago (0 = current week, 1 = last week, etc.)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get comprehensive stats for a specific week."""
     if week_offset < 0:
@@ -251,7 +251,7 @@ async def get_weekly_summary(
         period=TimePeriod.daily
     )
     
-    return StatsService.calculate_comprehensive_stats(
+    return await AsyncStatsService.calculate_comprehensive_stats(
         db=db,
         user_id=current_user.id,
         time_range=time_range
@@ -262,8 +262,8 @@ async def get_weekly_summary(
 async def get_monthly_summary(
     year: int = Query(..., description="Year for the monthly summary"),
     month: int = Query(..., ge=1, le=12, description="Month for the summary (1-12)"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get comprehensive stats for a specific month."""
     try:
@@ -288,7 +288,7 @@ async def get_monthly_summary(
         period=TimePeriod.daily
     )
     
-    return StatsService.calculate_comprehensive_stats(
+    return await AsyncStatsService.calculate_comprehensive_stats(
         db=db,
         user_id=current_user.id,
         time_range=time_range
@@ -301,14 +301,14 @@ async def get_period_comparison(
     current_num: int = Query(..., ge=1, le=365, description="Number of time units for current period"),
     previous_unit: TimeUnit = Query(..., description="Time unit for previous period"),
     previous_num: int = Query(..., ge=1, le=365, description="Number of time units for previous period"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Compare statistics between two time periods."""
     current_simple_range = SimpleTimeRange(unit=current_unit, num=current_num)
     previous_simple_range = SimpleTimeRange(unit=previous_unit, num=previous_num)
     
-    current_stats = StatsService.calculate_simple_comprehensive_stats(
+    current_stats = await AsyncStatsService.calculate_simple_comprehensive_stats(
         db=db, user_id=current_user.id, simple_range=current_simple_range
     )
     
@@ -339,7 +339,7 @@ async def get_period_comparison(
         period=TimePeriod.daily
     )
     
-    previous_stats = StatsService.calculate_comprehensive_stats(
+    previous_stats = await AsyncStatsService.calculate_comprehensive_stats(
         db=db, user_id=current_user.id, time_range=previous_time_range
     )
     
