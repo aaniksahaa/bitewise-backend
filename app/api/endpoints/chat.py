@@ -230,10 +230,13 @@ async def send_chat_message(
     api_logger.newline()
     api_logger.section_start("Chat Request", "REQUEST")
     
+    # Store user_id early to avoid lazy loading issues
+    user_id = current_user.id
+    
     # Log the incoming chat request
     truncated_message = chat_request.message[:100] + "..." if len(chat_request.message) > 100 else chat_request.message
     api_logger.info(f"📨 Incoming message: '{truncated_message}'", "REQUEST",
-                   user_id=current_user.id, conversation_id=chat_request.conversation_id,
+                   user_id=user_id, conversation_id=chat_request.conversation_id,
                    has_attachments=bool(chat_request.attachments))
     
     try:
@@ -246,7 +249,7 @@ async def send_chat_message(
             conversation = await ChatService.create_conversation(
                 db=db,
                 conversation_data=ConversationCreate(),
-                current_user_id=current_user.id
+                current_user_id=user_id
             )
             conversation_id = conversation.id
             api_logger.success(f"New conversation created: {conversation_id}", "SETUP")
@@ -265,7 +268,7 @@ async def send_chat_message(
             db=db,
             conversation_id=conversation_id,
             message_data=user_message_data,
-            current_user_id=current_user.id,
+            current_user_id=user_id,
             is_user_message=True
         )
         
@@ -279,7 +282,7 @@ async def send_chat_message(
             conversation_context=None,  # Could add conversation history here
             attachments=chat_request.attachments,
             db=db,
-            current_user_id=current_user.id
+            current_user_id=user_id
         )
         
         api_logger.success("AI response generated", "AI", 
@@ -324,7 +327,7 @@ async def send_chat_message(
             db=db,
             conversation_id=conversation_id,
             message_data=ai_message_data,
-            current_user_id=current_user.id,
+            current_user_id=user_id,
             is_user_message=False,
             llm_model_id=default_model.id if default_model else None,
             input_tokens=input_tokens,
@@ -344,24 +347,28 @@ async def send_chat_message(
             api_logger.debug(f"Cost calculated: ${cost_estimate:.6f}", "STORAGE", cost=cost_estimate)
         
         # Auto-generate conversation title if it's the first exchange
-        conversation = await ChatService.get_conversation_by_id(
-            db=db,
-            conversation_id=conversation_id,
-            current_user_id=current_user.id
-        )
-        
-        if conversation and not conversation.title:
-            api_logger.debug("Generating conversation title", "SETUP")
-            title = await ChatService.generate_conversation_title(db, conversation_id)
-            if title:
-                from app.schemas.chat import ConversationUpdate
-                await ChatService.update_conversation(
-                    db=db,
-                    conversation_id=conversation_id,
-                    conversation_update=ConversationUpdate(title=title),
-                    current_user_id=current_user.id
-                )
-                api_logger.success(f"Conversation title set: '{title}'", "SETUP")
+        try:
+            conversation = await ChatService.get_conversation_by_id(
+                db=db,
+                conversation_id=conversation_id,
+                current_user_id=user_id
+            )
+            
+            if conversation and not conversation.title:
+                api_logger.debug("Generating conversation title", "SETUP")
+                title = await ChatService.generate_conversation_title(db, conversation_id)
+                if title:
+                    from app.schemas.chat import ConversationUpdate
+                    await ChatService.update_conversation(
+                        db=db,
+                        conversation_id=conversation_id,
+                        conversation_update=ConversationUpdate(title=title),
+                        current_user_id=user_id
+                    )
+                    api_logger.success(f"Conversation title set: '{title}'", "SETUP")
+        except Exception as e:
+            api_logger.warning(f"Failed to generate conversation title: {str(e)}", "SETUP")
+            # Don't let title generation failure break the entire request
         
         # Log tool attachments if present for debugging
         if tool_attachments and "tool_calls" in tool_attachments:
@@ -384,22 +391,37 @@ async def send_chat_message(
                         error = tool_response.get("error", "unknown error")
                         api_logger.error(f"❌ Intake logging failed: {error}", "TOOLS", error=error)
         
-        response = ChatResponse(
-            conversation_id=conversation_id,
-            user_message=user_message,
-            ai_message=ai_message,
-            total_tokens_used=input_tokens + output_tokens,
-            cost_estimate=cost_estimate
-        )
-        
-        # Successful completion
-        api_logger.section_end("Chat Request", "REQUEST", success=True)
-        
-        return response
+        # Create response with error handling
+        try:
+            # Create simplified message responses to avoid database relationship issues
+            user_message_simple = MessageResponse.model_validate(user_message)
+            ai_message_simple = MessageResponse.model_validate(ai_message)
+            
+            response = ChatResponse(
+                conversation_id=conversation_id,
+                user_message=user_message_simple,
+                ai_message=ai_message_simple,
+                total_tokens_used=input_tokens + output_tokens,
+                cost_estimate=cost_estimate
+            )
+            
+            # Successful completion
+            api_logger.section_end("Chat Request", "REQUEST", success=True)
+            
+            return response
+        except Exception as e:
+            api_logger.error(f"Failed to create response: {str(e)}", "REQUEST", error=str(e))
+            # Return a simplified response to avoid the error
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create response: {str(e)}"
+            )
         
     except Exception as e:
+        # Use user_id if available, otherwise use a fallback
+        error_user_id = user_id if 'user_id' in locals() else None
         api_logger.error(f"Chat request failed: {str(e)}", "REQUEST",
-                       user_id=current_user.id, error=str(e))
+                       user_id=error_user_id, error=str(e))
         api_logger.section_end("Chat Request", "REQUEST", success=False)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -455,10 +477,13 @@ async def upload_image(
 ):
     """Upload an image to Supabase Storage."""
     try:
+        # Store user_id early to avoid lazy loading issues
+        user_id = current_user.id
+        
         # Upload image to Supabase
         download_url, metadata = await SupabaseStorageService.upload_image(
             file=image,
-            user_id=current_user.id,
+            user_id=user_id,
             folder="chat_images"
         )
         
@@ -527,7 +552,7 @@ async def send_chat_message_with_images(
             # Upload to Supabase Storage for persistence
             download_url, metadata = await SupabaseStorageService.upload_image(
                 file=image,
-                user_id=current_user.id,
+                user_id=user_id,
                 folder="chat_images"
             )
             
@@ -559,13 +584,16 @@ async def send_chat_message_with_images(
                 detail=f"Failed to process image {image.filename}: {str(e)}"
             )
     
+    # Store user_id early to avoid lazy loading issues
+    user_id = current_user.id
+    
     # Create conversation if not provided
     if not conversation_id:
         from app.schemas.chat import ConversationCreate
         conversation = await ChatService.create_conversation(
             db=db,
             conversation_data=ConversationCreate(),
-            current_user_id=current_user.id
+            current_user_id=user_id
         )
         conversation_id = conversation.id
     
@@ -584,7 +612,7 @@ async def send_chat_message_with_images(
         db=db,
         conversation_id=conversation_id,
         message_data=user_message_data,
-        current_user_id=current_user.id,
+        current_user_id=user_id,
         is_user_message=True
     )
     
@@ -601,7 +629,7 @@ async def send_chat_message_with_images(
         conversation_context=None,
         attachments=agent_attachments,
         db=db,
-        current_user_id=current_user.id
+        current_user_id=user_id
     )
     
     # Get default model for cost calculation
@@ -619,7 +647,7 @@ async def send_chat_message_with_images(
         db=db,
         conversation_id=conversation_id,
         message_data=ai_message_data,
-        current_user_id=current_user.id,
+        current_user_id=user_id,
         is_user_message=False,
         llm_model_id=default_model.id if default_model else None,
         input_tokens=input_tokens,
@@ -650,7 +678,7 @@ async def send_chat_message_with_images(
                 db=db,
                 conversation_id=conversation_id,
                 conversation_update=ConversationUpdate(title=title),
-                current_user_id=current_user.id
+                current_user_id=user_id
             )
     
     return ChatResponse(
@@ -672,8 +700,11 @@ async def confirm_dish_selection(
     api_logger.newline()
     api_logger.section_start("Dish Selection Confirmation", "CONFIRM")
     
+    # Store user_id early to avoid lazy loading issues
+    user_id = current_user.id
+    
     api_logger.info(f"🎯 Processing dish selection confirmation", "CONFIRM",
-                   user_id=current_user.id, widget_id=request.widget_id, 
+                   user_id=user_id, widget_id=request.widget_id, 
                    dish_id=request.dish_id, portion_size=request.portion_size)
     
     try:
@@ -690,7 +721,7 @@ async def confirm_dish_selection(
         # Find the conversation from the widget
         # We'll get the most recent conversation for this user
         result = await db.execute(
-            select(Conversation).where(Conversation.user_id == current_user.id)
+            select(Conversation).where(Conversation.user_id == user_id)
             .order_by(Conversation.updated_at.desc())
         )
         conversation = result.scalars().first()
@@ -764,7 +795,7 @@ async def confirm_dish_selection(
             db=db,
             conversation_id=conversation.id,
             message_data=user_message_data,
-            current_user_id=current_user.id,
+            current_user_id=user_id,
             is_user_message=True
         )
         
@@ -782,7 +813,7 @@ async def confirm_dish_selection(
         intake_result = await IntakeService.create_intake_by_name(
             db=db,
             intake_data=intake_data,
-            current_user_id=current_user.id
+            current_user_id=user_id
         )
         
         api_logger.success(f"✅ Intake logged successfully", "CONFIRM",
@@ -820,7 +851,7 @@ async def confirm_dish_selection(
             db=db,
             conversation_id=conversation.id,
             message_data=ai_message_data,
-            current_user_id=current_user.id,
+            current_user_id=user_id,
             is_user_message=False,
             input_tokens=10,
             output_tokens=len(ai_response_content.split())
@@ -842,12 +873,12 @@ async def confirm_dish_selection(
         
     except HTTPException as e:
         api_logger.error(f"Dish selection confirmation failed: {e.detail}", "CONFIRM",
-                       user_id=current_user.id, error=str(e.detail))
+                       user_id=user_id, error=str(e.detail))
         api_logger.section_end("Dish Selection Confirmation", "CONFIRM", success=False)
         raise e
     except Exception as e:
         api_logger.error(f"Dish selection confirmation failed: {str(e)}", "CONFIRM",
-                       user_id=current_user.id, error=str(e))
+                       user_id=user_id, error=str(e))
         api_logger.section_end("Dish Selection Confirmation", "CONFIRM", success=False)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
