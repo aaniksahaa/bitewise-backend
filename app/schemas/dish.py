@@ -4,6 +4,12 @@ from pydantic import BaseModel, Field, ConfigDict
 from decimal import Decimal
 
 
+class DishIngredientCreate(BaseModel):
+    """Schema for creating dish-ingredient relationships"""
+    ingredient_id: int = Field(..., description="ID of the ingredient")
+    quantity: Decimal = Field(..., ge=0, description="Quantity of the ingredient")
+
+
 class DishBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Name of the dish")
     description: Optional[str] = Field(None, description="Description of the dish")
@@ -45,6 +51,41 @@ class DishCreate(DishBase):
     vit_d_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin D in micrograms")
     vit_e_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin E in milligrams")
     vit_k_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin K in micrograms")
+
+
+class DishCreateWithIngredients(DishBase):
+    """Schema for creating a new dish with ingredients"""
+    # Nutritional information (optional for create)
+    calories: Optional[Decimal] = Field(None, ge=0, description="Calories per serving")
+    protein_g: Optional[Decimal] = Field(None, ge=0, description="Protein in grams")
+    carbs_g: Optional[Decimal] = Field(None, ge=0, description="Carbohydrates in grams")
+    fats_g: Optional[Decimal] = Field(None, ge=0, description="Fats in grams")
+    sat_fats_g: Optional[Decimal] = Field(None, ge=0, description="Saturated fats in grams")
+    unsat_fats_g: Optional[Decimal] = Field(None, ge=0, description="Unsaturated fats in grams")
+    trans_fats_g: Optional[Decimal] = Field(None, ge=0, description="Trans fats in grams")
+    fiber_g: Optional[Decimal] = Field(None, ge=0, description="Fiber in grams")
+    sugar_g: Optional[Decimal] = Field(None, ge=0, description="Sugar in grams")
+    calcium_mg: Optional[Decimal] = Field(None, ge=0, description="Calcium in milligrams")
+    iron_mg: Optional[Decimal] = Field(None, ge=0, description="Iron in milligrams")
+    potassium_mg: Optional[Decimal] = Field(None, ge=0, description="Potassium in milligrams")
+    sodium_mg: Optional[Decimal] = Field(None, ge=0, description="Sodium in milligrams")
+    zinc_mg: Optional[Decimal] = Field(None, ge=0, description="Zinc in milligrams")
+    magnesium_mg: Optional[Decimal] = Field(None, ge=0, description="Magnesium in milligrams")
+    vit_a_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin A in micrograms")
+    vit_b1_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B1 in milligrams")
+    vit_b2_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B2 in milligrams")
+    vit_b3_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B3 in milligrams")
+    vit_b5_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B5 in milligrams")
+    vit_b6_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B6 in milligrams")
+    vit_b9_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B9 in micrograms")
+    vit_b12_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B12 in milligrams")
+    vit_c_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin C in milligrams")
+    vit_d_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin D in micrograms")
+    vit_e_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin E in milligrams")
+    vit_k_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin K in micrograms")
+    
+    # Ingredients list
+    ingredients: Optional[List[DishIngredientCreate]] = Field(None, description="List of ingredients with quantities")
 
 
 class DishUpdate(BaseModel):
@@ -155,3 +196,38 @@ class DishListResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int 
+
+
+class DishCreateWithIngredients(DishBase):
+    """Schema for creating a new dish with ingredients"""
+    # Nutritional information (optional for create)
+    calories: Optional[Decimal] = Field(None, ge=0, description="Calories per serving")
+    protein_g: Optional[Decimal] = Field(None, ge=0, description="Protein in grams")
+    carbs_g: Optional[Decimal] = Field(None, ge=0, description="Carbohydrates in grams")
+    fats_g: Optional[Decimal] = Field(None, ge=0, description="Fats in grams")
+    sat_fats_g: Optional[Decimal] = Field(None, ge=0, description="Saturated fats in grams")
+    unsat_fats_g: Optional[Decimal] = Field(None, ge=0, description="Unsaturated fats in grams")
+    trans_fats_g: Optional[Decimal] = Field(None, ge=0, description="Trans fats in grams")
+    fiber_g: Optional[Decimal] = Field(None, ge=0, description="Fiber in grams")
+    sugar_g: Optional[Decimal] = Field(None, ge=0, description="Sugar in grams")
+    calcium_mg: Optional[Decimal] = Field(None, ge=0, description="Calcium in milligrams")
+    iron_mg: Optional[Decimal] = Field(None, ge=0, description="Iron in milligrams")
+    potassium_mg: Optional[Decimal] = Field(None, ge=0, description="Potassium in milligrams")
+    sodium_mg: Optional[Decimal] = Field(None, ge=0, description="Sodium in milligrams")
+    zinc_mg: Optional[Decimal] = Field(None, ge=0, description="Zinc in milligrams")
+    magnesium_mg: Optional[Decimal] = Field(None, ge=0, description="Magnesium in milligrams")
+    vit_a_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin A in micrograms")
+    vit_b1_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B1 in milligrams")
+    vit_b2_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B2 in milligrams")
+    vit_b3_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B3 in milligrams")
+    vit_b5_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B5 in milligrams")
+    vit_b6_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B6 in milligrams")
+    vit_b9_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B9 in micrograms")
+    vit_b12_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin B12 in milligrams")
+    vit_c_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin C in milligrams")
+    vit_d_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin D in micrograms")
+    vit_e_mg: Optional[Decimal] = Field(None, ge=0, description="Vitamin E in milligrams")
+    vit_k_mcg: Optional[Decimal] = Field(None, ge=0, description="Vitamin K in micrograms")
+    
+    # Ingredients list
+    ingredients: Optional[List[DishIngredientCreate]] = Field(None, description="List of ingredients with quantities") 
