@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.orm import relationship
 
@@ -18,7 +18,7 @@ class User(Base):
     is_superuser = Column(Boolean, default=False)
     oauth_provider = Column(String, nullable=True)  # google, apple, etc.
     oauth_id = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_login_at = Column(DateTime, nullable=True)  # Track last successful login
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_login_at = Column(DateTime(timezone=True), nullable=True)  # Track last successful login
     profile = relationship("UserProfile", uselist=False, back_populates="user") 

@@ -1,6 +1,7 @@
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, or_, and_, select, update, func
 from fastapi import HTTPException, status
 import math
 
@@ -12,7 +13,7 @@ from app.utils.logger import dish_logger
 
 class DishService:
     @staticmethod
-    def create_dish(db: Session, dish_data: DishCreate, current_user_id: int) -> DishResponse:
+    async def create_dish(db: AsyncSession, dish_data: DishCreate, current_user_id: int) -> DishResponse:
         """Create a new dish."""
         # Create dish with user as creator
         db_dish = Dish(
@@ -21,23 +22,25 @@ class DishService:
         )
         
         db.add(db_dish)
-        db.commit()
-        db.refresh(db_dish)
+        await db.commit()
+        await db.refresh(db_dish)
         
         return DishResponse.model_validate(db_dish)
 
     @staticmethod
-    def get_dish_by_id(db: Session, dish_id: int) -> Optional[DishResponse]:
+    async def get_dish_by_id(db: AsyncSession, dish_id: int) -> Optional[DishResponse]:
         """Get a dish by its ID."""
-        dish = db.query(Dish).filter(Dish.id == dish_id).first()
+        # dish = db.query(Dish).filter(Dish.id == dish_id).first()
+        # modified for asyncio
+        dish = (await db.execute(select(Dish).where(Dish.id == dish_id))).scalars().first()
         if not dish:
             return None
         
         return DishResponse.model_validate(dish)
 
     @staticmethod
-    def get_dishes(
-        db: Session, 
+    async def get_dishes(
+        db: AsyncSession, 
         search: Optional[str] = None,
         cuisine: Optional[str] = None,
         created_by_user_id: Optional[int] = None,
@@ -47,7 +50,7 @@ class DishService:
         """Get dishes with optional search and filtering."""
         # If there's a search term, use the new fuzzy search
         if search and search.strip():
-            return DishService._fuzzy_search_dishes(
+            return await DishService._fuzzy_search_dishes(
                 db=db,
                 search_term=search,
                 cuisine=cuisine,
@@ -57,22 +60,30 @@ class DishService:
             )
         
         # Otherwise, use the original filtering logic
-        query = db.query(Dish)
+        # query = db.query(Dish)
+        # modified for asyncio
+        query = select(Dish)
         
         # Apply cuisine filter
         if cuisine:
-            query = query.filter(Dish.cuisine.ilike(f"%{cuisine}%"))
+            # query = query.filter(Dish.cuisine.ilike(f"%{cuisine}%"))
+            query = query.where(Dish.cuisine.ilike(f"%{cuisine}%"))
             
         # Apply creator filter
         if created_by_user_id:
-            query = query.filter(Dish.created_by_user_id == created_by_user_id)
+            # query = query.filter(Dish.created_by_user_id == created_by_user_id)
+            query = query.where(Dish.created_by_user_id == created_by_user_id)
         
         # Get total count
-        total_count = query.count()
+        # total_count = query.count()
+        # modified for asyncio
+        total_count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
         
         # Apply pagination
         offset = (page - 1) * page_size
-        dishes = query.offset(offset).limit(page_size).all()
+        # dishes = query.offset(offset).limit(page_size).all()
+        # modified for asyncio
+        dishes = (await db.execute(query.offset(offset).limit(page_size))).scalars().all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
@@ -89,8 +100,8 @@ class DishService:
         )
 
     @staticmethod
-    def _fuzzy_search_dishes(
-        db: Session,
+    async def _fuzzy_search_dishes(
+        db: AsyncSession,
         search_term: str,
         cuisine: Optional[str] = None,
         created_by_user_id: Optional[int] = None,
@@ -99,7 +110,7 @@ class DishService:
     ) -> DishListResponse:
         """Internal method for fuzzy search with additional filters."""
         # Get scored results from fuzzy search
-        scored_dishes, total_before_filters = SearchUtils.search_dishes_with_scoring(
+        scored_dishes, total_before_filters = await SearchUtils.search_dishes_with_scoring(
             db=db,
             search_term=search_term,
             page=1,  # Get all results first for filtering
@@ -144,8 +155,8 @@ class DishService:
         )
 
     @staticmethod
-    def search_dishes_by_name(
-        db: Session,
+    async def search_dishes_by_name(
+        db: AsyncSession,
         search_term: str,
         page: int = 1,
         page_size: int = 20
@@ -159,14 +170,20 @@ class DishService:
         search_filter = Dish.name.ilike(f"%{search_term}%")
         
         # Build query
-        query = db.query(Dish).filter(search_filter)
+        # query = db.query(Dish).filter(search_filter)
+        # modified for asyncio
+        query = select(Dish).where(search_filter)
         
         # Get total count before pagination
-        total_count = query.count()
+        # total_count = query.count()
+        # modified for asyncio
+        total_count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
         
         # Apply pagination
         offset = (page - 1) * page_size
-        dishes = query.offset(offset).limit(page_size).all()
+        # dishes = query.offset(offset).limit(page_size).all()
+        # modified for asyncio
+        dishes = (await db.execute(query.offset(offset).limit(page_size))).scalars().all()
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
@@ -203,14 +220,16 @@ class DishService:
         )
 
     @staticmethod
-    def update_dish(
-        db: Session, 
+    async def update_dish(
+        db: AsyncSession, 
         dish_id: int, 
         dish_update: DishUpdate, 
         current_user_id: int
     ) -> Optional[DishResponse]:
         """Update an existing dish."""
-        dish = db.query(Dish).filter(Dish.id == dish_id).first()
+        # dish = db.query(Dish).filter(Dish.id == dish_id).first()
+        # modified for asyncio
+        dish = (await db.execute(select(Dish).where(Dish.id == dish_id))).scalars().first()
         
         if not dish:
             return None
@@ -227,15 +246,17 @@ class DishService:
         for field, value in update_data.items():
             setattr(dish, field, value)
         
-        db.commit()
-        db.refresh(dish)
+        await db.commit()
+        await db.refresh(dish)
         
         return DishResponse.model_validate(dish)
 
     @staticmethod
-    def delete_dish(db: Session, dish_id: int, current_user_id: int) -> bool:
+    async def delete_dish(db: AsyncSession, dish_id: int, current_user_id: int) -> bool:
         """Delete a dish."""
-        dish = db.query(Dish).filter(Dish.id == dish_id).first()
+        # dish = db.query(Dish).filter(Dish.id == dish_id).first()
+        # modified for asyncio
+        dish = (await db.execute(select(Dish).where(Dish.id == dish_id))).scalars().first()
         
         if not dish:
             return False
@@ -247,20 +268,20 @@ class DishService:
                 detail="Not authorized to delete this dish"
             )
         
-        db.delete(dish)
-        db.commit()
+        await db.delete(dish)
+        await db.commit()
         
         return True
 
     @staticmethod
-    def get_user_dishes(
-        db: Session, 
+    async def get_user_dishes(
+        db: AsyncSession, 
         user_id: int, 
         page: int = 1, 
         page_size: int = 20
     ) -> DishListResponse:
         """Get all dishes created by a specific user."""
-        return DishService.get_dishes(
+        return await DishService.get_dishes(
             db=db,
             created_by_user_id=user_id,
             page=page,
@@ -268,14 +289,14 @@ class DishService:
         )
 
     @staticmethod
-    def get_dishes_by_cuisine(
-        db: Session, 
+    async def get_dishes_by_cuisine(
+        db: AsyncSession, 
         cuisine: str, 
         page: int = 1, 
         page_size: int = 20
     ) -> DishListResponse:
         """Get dishes filtered by cuisine."""
-        return DishService.get_dishes(
+        return await DishService.get_dishes(
             db=db,
             cuisine=cuisine,
             page=page,

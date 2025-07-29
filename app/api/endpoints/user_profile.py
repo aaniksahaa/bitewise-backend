@@ -6,7 +6,7 @@ creation, retrieval, updating, and deletion of user profiles.
 
 from fastapi import APIRouter, Depends, status, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
-
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user_profile import UserProfileCreate, UserProfileResponse, UserProfileUpdate
@@ -22,31 +22,31 @@ router = APIRouter()
 )
 async def create_profile(
     profile_data: UserProfileCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new user profile."""
-    return UserProfileService.create_profile(
+    return await UserProfileService.create_profile(
         db=db, user_id=current_user.id, profile_data=profile_data
     )
 
 
 @router.get("/me", response_model=UserProfileResponse)
 async def get_my_profile(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_active_user)
 ):
     """Get the current user's profile."""
-    return UserProfileService.get_profile(db=db, user_id=current_user.id)
+    return await UserProfileService.get_profile(db=db, user_id=current_user.id)
 
 
 @router.put("/me", response_model=UserProfileResponse)
 async def update_my_profile(
     profile_data: UserProfileUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """Update the current user's profile."""
-    return UserProfileService.update_profile(
+    return await UserProfileService.update_profile(
         db=db, user_id=current_user.id, profile_data=profile_data
     )
 
@@ -54,7 +54,7 @@ async def update_my_profile(
 @router.post("/me/profile-picture")
 async def upload_profile_picture(
     image: UploadFile = File(..., description="Profile picture to upload"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Upload a profile picture and update the user's profile."""
@@ -68,7 +68,7 @@ async def upload_profile_picture(
         
         # Update the profile with the new image URL
         profile_update = UserProfileUpdate(profile_image_url=download_url)
-        updated_profile = UserProfileService.update_profile(
+        updated_profile = await UserProfileService.update_profile(
             db=db, user_id=current_user.id, profile_data=profile_update
         )
         
@@ -90,9 +90,10 @@ async def upload_profile_picture(
         )
 
 
-@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/me", status_code=status.HTTP_200_OK)
 async def delete_my_profile(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_active_user)
 ):
     """Delete the current user's profile."""
-    UserProfileService.delete_profile(db=db, user_id=current_user.id)
+    await UserProfileService.delete_profile(db=db, user_id=current_user.id)
+    return {"message": "Profile deleted successfully"}

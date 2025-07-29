@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional
 
@@ -21,11 +22,11 @@ router = APIRouter()
 @router.post("/", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
 async def create_intake(
     intake_data: IntakeCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Create a new intake record."""
-    return IntakeService.create_intake(
+    return await IntakeService.create_intake(
         db=db, 
         intake_data=intake_data, 
         current_user_id=current_user.id
@@ -35,11 +36,11 @@ async def create_intake(
 @router.post("/by-name", response_model=IntakeResponse, status_code=status.HTTP_201_CREATED)
 async def create_intake_by_name(
     intake_data: IntakeCreateByName,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Create a new intake record using dish name instead of dish ID."""
-    return IntakeService.create_intake_by_name(
+    return await IntakeService.create_intake_by_name(
         db=db, 
         intake_data=intake_data, 
         current_user_id=current_user.id
@@ -50,11 +51,11 @@ async def create_intake_by_name(
 async def get_my_intakes(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get all intakes for the current user with pagination."""
-    return IntakeService.get_user_intakes(
+    return await IntakeService.get_user_intakes(
         db=db,
         current_user_id=current_user.id,
         page=page,
@@ -68,11 +69,11 @@ async def get_intakes_by_period(
     end_time: datetime = Query(..., description="End of the time period (ISO format)"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get intakes for the current user between specific date/time periods."""
-    return IntakeService.get_intakes_by_period(
+    return await IntakeService.get_intakes_by_period(
         db=db,
         current_user_id=current_user.id,
         start_time=start_time,
@@ -84,11 +85,11 @@ async def get_intakes_by_period(
 
 @router.get("/today", response_model=IntakeListResponse)
 async def get_today_intakes(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get all intakes from the last 24 hours for the current user."""
-    return IntakeService.get_today_intakes(
+    return await IntakeService.get_today_intakes(
         db=db,
         current_user_id=current_user.id
     )
@@ -96,11 +97,11 @@ async def get_today_intakes(
 
 @router.get("/calendar-day", response_model=IntakeListResponse)
 async def get_calendar_day_intakes(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get all intakes for the current calendar day (00:00 to 23:59 today) for the current user."""
-    return IntakeService.get_calendar_day_intakes(
+    return await IntakeService.get_calendar_day_intakes(
         db=db,
         current_user_id=current_user.id
     )
@@ -109,11 +110,11 @@ async def get_calendar_day_intakes(
 @router.get("/{intake_id}", response_model=IntakeResponse)
 async def get_intake(
     intake_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get a specific intake by ID (only for the current user)."""
-    intake = IntakeService.get_intake_by_id(
+    intake = await IntakeService.get_intake_by_id(
         db=db, 
         intake_id=intake_id, 
         current_user_id=current_user.id
@@ -130,11 +131,11 @@ async def get_intake(
 async def update_intake(
     intake_id: int,
     intake_update: IntakeUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Update an intake (only for the current user)."""
-    intake = IntakeService.update_intake(
+    intake = await IntakeService.update_intake(
         db=db,
         intake_id=intake_id,
         intake_update=intake_update,
@@ -148,14 +149,14 @@ async def update_intake(
     return intake
 
 
-@router.delete("/{intake_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{intake_id}", status_code=status.HTTP_200_OK)
 async def delete_intake(
     intake_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Delete an intake (only for the current user)."""
-    success = IntakeService.delete_intake(
+    success = await IntakeService.delete_intake(
         db=db,
         intake_id=intake_id,
         current_user_id=current_user.id
@@ -165,3 +166,4 @@ async def delete_intake(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Intake not found"
         ) 
+    return {"message": f"Intake {intake_id} deleted successfully"}
