@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 
@@ -6,7 +6,8 @@ from app.db.async_session import get_async_db
 from app.services.async_auth import get_current_active_user_async
 from app.services.async_dish import AsyncDishService
 from app.services.async_ingredient import AsyncIngredientService
-from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListResponse
+from app.services.supabase_storage import SupabaseStorageService
+from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListResponse, DishCreateWithIngredients
 from app.schemas.ingredient import DishIngredientResponse
 from app.models.user import User
 
@@ -36,6 +37,47 @@ async def create_dish(
 ):
     """Create a new dish."""
     return await AsyncDishService.create_dish(
+        db=db, 
+        dish_data=dish_data, 
+        current_user_id=current_user.id
+    )
+
+
+@router.post("/upload-image")
+async def upload_dish_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user_async)
+):
+    """Upload an image for a dish."""
+    try:
+        download_url, metadata = SupabaseStorageService.upload_image(
+            file=file,
+            user_id=current_user.id,
+            folder="dish_images"
+        )
+        
+        return {
+            "success": True,
+            "image_url": download_url,
+            "metadata": metadata
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload image: {str(e)}"
+        )
+
+
+@router.post("/with-ingredients", response_model=DishResponse, status_code=status.HTTP_201_CREATED)
+async def create_dish_with_ingredients(
+    dish_data: DishCreateWithIngredients,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
+):
+    """Create a new dish with ingredients."""
+    return await AsyncDishService.create_dish_with_ingredients(
         db=db, 
         dish_data=dish_data, 
         current_user_id=current_user.id

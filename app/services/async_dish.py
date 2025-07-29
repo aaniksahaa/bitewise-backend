@@ -5,7 +5,8 @@ from fastapi import HTTPException, status
 import math
 
 from app.models.dish import Dish
-from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListItem, DishListResponse
+from app.models.dish_ingredient import DishIngredient
+from app.schemas.dish import DishCreate, DishUpdate, DishResponse, DishListItem, DishListResponse, DishCreateWithIngredients
 from app.utils.logger import dish_logger
 
 
@@ -31,6 +32,60 @@ class AsyncDishService:
         await db.refresh(db_dish)
         
         return DishResponse.model_validate(db_dish)
+
+    @staticmethod
+    async def create_dish_with_ingredients(
+        db: AsyncSession, 
+        dish_data: DishCreateWithIngredients, 
+        current_user_id: int
+    ) -> DishResponse:
+        """Create a new dish with ingredients asynchronously."""
+        try:
+            # Extract ingredients data before creating dish
+            ingredients_data = dish_data.ingredients or []
+            
+            # Remove ingredients from dish data to avoid issues with model creation
+            dish_dict = dish_data.model_dump(exclude={'ingredients'})
+            
+            # Create dish with user as creator
+            db_dish = Dish(
+                **dish_dict,
+                created_by_user_id=current_user_id
+            )
+            
+            db.add(db_dish)
+            await db.commit()
+            await db.refresh(db_dish)
+            
+            # Create dish-ingredient relationships if ingredients are provided
+            if ingredients_data:
+                for ingredient_data in ingredients_data:
+                    dish_ingredient = DishIngredient(
+                        dish_id=db_dish.id,
+                        ingredient_id=ingredient_data.ingredient_id,
+                        quantity=ingredient_data.quantity
+                    )
+                    db.add(dish_ingredient)
+                
+                await db.commit()
+            
+            dish_logger.success(
+                f"Created dish with {len(ingredients_data)} ingredients", 
+                "CREATE",
+                dish_id=db_dish.id,
+                dish_name=db_dish.name,
+                user_id=current_user_id
+            )
+            
+            return DishResponse.model_validate(db_dish)
+            
+        except Exception as e:
+            await db.rollback()
+            dish_logger.error(f"Failed to create dish with ingredients: {e}", "CREATE")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create dish: {str(e)}"
+            )
 
     @staticmethod
     async def get_dish_by_id(db: AsyncSession, dish_id: int) -> Optional[DishResponse]:
