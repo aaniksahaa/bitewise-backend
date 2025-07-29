@@ -184,13 +184,13 @@ async def verify_login(verification_data: LoginVerify, db: AsyncSession = Depend
     Verify the login OTP and return an access token upon successful verification.
     """
     user_id = verification_data.login_request_id
-    user_email = user.email
     user = (await db.execute(select(User).where(User.id == int(user_id)))).scalars().first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+    user_email = user.email
 
     # Verify OTP
     otp_verification = await AuthService.verify_otp(
@@ -204,10 +204,10 @@ async def verify_login(verification_data: LoginVerify, db: AsyncSession = Depend
 
     # Generate tokens
     access_token = AuthService.create_access_token(user_id)
-    refresh_token = await AuthService.create_refresh_token(db, user_id)
+    refresh_token = await AuthService.create_refresh_token(db, int(user_id))
     
     # Update last login time after successful OTP verification
-    await AuthService.update_last_login(db, user_id)
+    await AuthService.update_last_login(db, int(user_id))
 
     return LoginVerifyResponse(
         access_token=access_token,
