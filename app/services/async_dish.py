@@ -174,13 +174,13 @@ class AsyncDishService:
         page_size: int = 20
     ) -> DishListResponse:
         """Internal method for fuzzy search with additional filters asynchronously."""
-        # Get scored results from fuzzy search
+        # Get scored results from enhanced search
         scored_dishes, total_before_filters = await AsyncDishService._async_search_dishes_with_scoring(
             db=db,
             search_term=search_term,
             page=1,  # Get all results first for filtering
             page_size=1000,  # Large number to get all results
-            min_score_threshold=5.0  # Lower threshold for more inclusive results
+            min_score_threshold=0.1  # Low threshold for inclusive results
         )
         
         # Apply additional filters if specified
@@ -220,66 +220,250 @@ class AsyncDishService:
         )
 
     @staticmethod
+    def _generate_spelling_variations(search_term: str) -> List[str]:
+        """
+        Generate common spelling variations to improve typo tolerance.
+        
+        Args:
+            search_term: The original search term
+            
+        Returns:
+            List of spelling variations including the original term
+        """
+        variations = [search_term]
+        words = search_term.split()
+        
+        # Common spelling corrections for food-related terms
+        spelling_corrections = {
+            'piza': 'pizza',
+            'pizzza': 'pizza', 
+            'chiken': 'chicken',
+            'chikken': 'chicken',
+            'chickn': 'chicken',
+            'burrito': 'burrito',  # Keep original
+            'burito': 'burrito',
+            'burrito': 'burrito',
+            'pasta': 'pasta',  # Keep original
+            'psta': 'pasta',
+            'spagetti': 'spaghetti',
+            'spagheti': 'spaghetti',
+            'spghetti': 'spaghetti',
+            'salad': 'salad',  # Keep original
+            'salade': 'salad',
+            'curry': 'curry',  # Keep original
+            'currie': 'curry',
+            'curie': 'curry',
+            'rice': 'rice',  # Keep original
+            'ric': 'rice',
+            'ryce': 'rice',
+            'salmon': 'salmon',  # Keep original
+            'salomon': 'salmon',
+            'salmn': 'salmon',
+            'beef': 'beef',  # Keep original  
+            'beaf': 'beef',
+            'pork': 'pork',  # Keep original
+            'porc': 'pork',
+            'vegetable': 'vegetable',  # Keep original
+            'vegetabel': 'vegetable',
+            'vegatable': 'vegetable',
+            'vegtable': 'vegetable',
+        }
+        
+        # Generate variations with corrected spellings
+        corrected_words = []
+        has_corrections = False
+        
+        for word in words:
+            word_lower = word.lower()
+            if word_lower in spelling_corrections:
+                corrected_words.append(spelling_corrections[word_lower])
+                has_corrections = True
+            else:
+                corrected_words.append(word)
+        
+        if has_corrections:
+            corrected_term = ' '.join(corrected_words)
+            if corrected_term not in variations:
+                variations.append(corrected_term)
+        
+        return variations
+
+    @staticmethod
     async def _async_search_dishes_with_scoring(
         db: AsyncSession,
         search_term: str,
         page: int = 1,
         page_size: int = 20,
-        min_score_threshold: float = 5.0
+        min_score_threshold: float = 0.1
     ) -> Tuple[List[Tuple[Dish, float]], int]:
         """
-        Async version of dish search with scoring.
+        Enhanced async dish search with robust text matching and scoring.
         
-        This is a simplified async implementation. For full fuzzy search functionality,
-        the SearchUtils class would need to be updated to support async operations.
-        For now, we'll implement basic text search with async patterns.
+        Uses PostgreSQL's full-text search capabilities for:
+        - Multi-word queries (e.g., "pepperoni pizza")
+        - Partial word matching
+        - Better relevance scoring
+        - Some typo tolerance through similarity matching and spelling corrections
         """
-        # Create search filters for name, description, and cuisine
-        search_filter = or_(
-            Dish.name.ilike(f"%{search_term}%"),
-            Dish.description.ilike(f"%{search_term}%"),
-            Dish.cuisine.ilike(f"%{search_term}%")
-        )
+        # Generate spelling variations to improve typo tolerance
+        search_variations = AsyncDishService._generate_spelling_variations(search_term)
         
-        # Build query with image filter
-        stmt = select(Dish).where(
-            and_(
-                search_filter,
-                Dish.image_urls.is_not(None),
-                func.array_length(Dish.image_urls, 1) > 0
-            )
-        )
+        all_scored_dishes = []
+        processed_dish_ids = set()
         
-        # Get total count before pagination
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        count_result = await db.execute(count_stmt)
-        total_count = count_result.scalar()
-        
-        # Apply pagination
-        offset = (page - 1) * page_size
-        paginated_stmt = stmt.offset(offset).limit(page_size)
-        result = await db.execute(paginated_stmt)
-        dishes = result.scalars().all()
-        
-        # For now, assign a simple score based on exact matches
-        # In a full implementation, this would use proper fuzzy matching algorithms
-        scored_dishes = []
-        for dish in dishes:
-            score = 10.0  # Base score
-            if search_term.lower() in dish.name.lower():
-                score += 20.0
-            if dish.description and search_term.lower() in dish.description.lower():
-                score += 10.0
-            if dish.cuisine and search_term.lower() in dish.cuisine.lower():
-                score += 15.0
+        # Search with each variation
+        for variation in search_variations:
+            # Clean and prepare search term
+            variation_clean = variation.strip().lower()
+            search_words = variation_clean.split()
             
-            if score >= min_score_threshold:
-                scored_dishes.append((dish, score))
+            # Build the main query
+            stmt = select(Dish).where(
+                and_(
+                    Dish.image_urls.is_not(None),
+                    func.array_length(Dish.image_urls, 1) > 0
+                )
+            )
+            
+            # Create multiple search strategies and combine results
+            search_filters = []
+            
+            # Strategy 1: Full-text search using PostgreSQL's tsvector
+            # This handles multi-word queries well
+            fts_condition = or_(
+                func.to_tsvector('english', func.coalesce(Dish.name, '')).op('@@')(
+                    func.plainto_tsquery('english', variation_clean)
+                ),
+                func.to_tsvector('english', func.coalesce(Dish.description, '')).op('@@')(
+                    func.plainto_tsquery('english', variation_clean)
+                ),
+                func.to_tsvector('english', func.coalesce(Dish.cuisine, '')).op('@@')(
+                    func.plainto_tsquery('english', variation_clean)
+                )
+            )
+            search_filters.append(fts_condition)
+            
+            # Strategy 2: Partial word matching for each word in the search term
+            for word in search_words:
+                if len(word) >= 2:  # Only search for words with 2+ characters
+                    word_condition = or_(
+                        Dish.name.ilike(f"%{word}%"),
+                        Dish.description.ilike(f"%{word}%"),
+                        Dish.cuisine.ilike(f"%{word}%")
+                    )
+                    search_filters.append(word_condition)
+            
+            # Strategy 3: Exact phrase matching
+            phrase_condition = or_(
+                Dish.name.ilike(f"%{variation_clean}%"),
+                Dish.description.ilike(f"%{variation_clean}%"),
+                Dish.cuisine.ilike(f"%{variation_clean}%")
+            )
+            search_filters.append(phrase_condition)
+            
+            # Combine all search strategies
+            if search_filters:
+                combined_filter = or_(*search_filters)
+                stmt = stmt.where(combined_filter)
+                
+                # Execute the search query
+                result = await db.execute(stmt)
+                dishes = result.scalars().all()
+                
+                # Enhanced scoring algorithm
+                for dish in dishes:
+                    if dish.id not in processed_dish_ids:
+                        score = await AsyncDishService._calculate_search_score(dish, variation_clean, search_words)
+                        
+                        # Boost score if this came from a spelling correction
+                        if variation != search_term:
+                            score *= 0.95  # Slight penalty for corrected terms
+                        
+                        if score >= min_score_threshold:
+                            all_scored_dishes.append((dish, score))
+                            processed_dish_ids.add(dish.id)
         
         # Sort by score descending
-        scored_dishes.sort(key=lambda x: x[1], reverse=True)
+        all_scored_dishes.sort(key=lambda x: x[1], reverse=True)
         
-        return scored_dishes, total_count
+        # Get total count before pagination
+        total_count = len(all_scored_dishes)
+        
+        # Apply pagination to scored results
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_dishes = all_scored_dishes[start_idx:end_idx]
+        
+        return paginated_dishes, total_count
+
+    @staticmethod
+    async def _calculate_search_score(dish: Dish, search_term: str, search_words: List[str]) -> float:
+        """
+        Calculate relevance score for a dish based on search term.
+        Higher score means more relevant.
+        """
+        score = 0.0
+        dish_name = (dish.name or "").lower()
+        dish_description = (dish.description or "").lower()
+        dish_cuisine = (dish.cuisine or "").lower()
+        search_term_lower = search_term.lower()
+        
+        # Exact phrase match (highest priority)
+        if search_term_lower == dish_name:
+            score += 100.0
+        elif search_term_lower in dish_name:
+            score += 50.0
+        elif search_term_lower in dish_description:
+            score += 25.0
+        elif search_term_lower in dish_cuisine:
+            score += 30.0
+        
+        # Individual word matches
+        for word in search_words:
+            word_lower = word.lower()
+            if len(word_lower) >= 2:
+                # Name matches (high priority)
+                if word_lower == dish_name:
+                    score += 40.0
+                elif dish_name.startswith(word_lower):
+                    score += 30.0
+                elif dish_name.endswith(word_lower):
+                    score += 25.0
+                elif word_lower in dish_name:
+                    score += 20.0
+                
+                # Description matches (medium priority)
+                if word_lower in dish_description:
+                    score += 10.0
+                
+                # Cuisine matches (medium-high priority)
+                if word_lower in dish_cuisine:
+                    score += 15.0
+        
+        # Bonus for dishes with all search words present
+        if len(search_words) > 1:
+            words_found = sum(1 for word in search_words 
+                            if word.lower() in dish_name or 
+                               word.lower() in dish_description or 
+                               word.lower() in dish_cuisine)
+            if words_found == len(search_words):
+                score += 20.0
+            elif words_found >= len(search_words) * 0.7:  # 70% of words found
+                score += 10.0
+        
+        # Length penalty for very long names (prefer more specific matches)
+        if dish.name:
+            name_length = len(dish.name)
+            if name_length > 50:
+                score *= 0.9
+            elif name_length > 100:
+                score *= 0.8
+        
+        # Bonus for dishes with complete nutritional information
+        if dish.calories and dish.protein_g and dish.carbs_g and dish.fats_g:
+            score += 2.0
+        
+        return score
 
     @staticmethod
     async def search_dishes_by_name(
@@ -288,32 +472,24 @@ class AsyncDishService:
         page: int = 1,
         page_size: int = 20
     ) -> DishListResponse:
-        """Search dishes by name with case-insensitive partial matching asynchronously."""
+        """Enhanced search dishes by name with robust text matching."""
         
-        dish_logger.debug(f"🔍 Async searching dishes: '{search_term}'", "SEARCH", 
+        dish_logger.debug(f"🔍 Enhanced async searching dishes: '{search_term}'", "SEARCH", 
                          page=page, page_size=page_size)
         
-        # Create search filter
-        search_filter = Dish.name.ilike(f"%{search_term}%")
-        
-        # Build query
-        stmt = select(Dish).where(search_filter)
-        
-        # Get total count before pagination
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        count_result = await db.execute(count_stmt)
-        total_count = count_result.scalar()
-        
-        # Apply pagination
-        offset = (page - 1) * page_size
-        paginated_stmt = stmt.offset(offset).limit(page_size)
-        result = await db.execute(paginated_stmt)
-        dishes = result.scalars().all()
+        # Use the enhanced scoring search method
+        scored_dishes, total_count = await AsyncDishService._async_search_dishes_with_scoring(
+            db=db,
+            search_term=search_term,
+            page=page,
+            page_size=page_size,
+            min_score_threshold=0.1  # Very low threshold to be inclusive
+        )
         
         # Calculate total pages
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Convert to list items
+        # Convert to list items (ignoring scores in final response)
         dish_items = [
             DishListItem(
                 id=dish.id,
@@ -331,23 +507,23 @@ class AsyncDishService:
                 carbs_g=dish.carbs_g,
                 fats_g=dish.fats_g
             )
-            for dish in dishes
+            for dish, score in scored_dishes
         ]
         
-        dish_logger.success(f"Found {total_count} dishes", "SEARCH",
-                          search_term=search_term, returned_count=len(dishes), total_count=total_count)
+        dish_logger.success(f"Found {len(scored_dishes)} dishes with enhanced search", "SEARCH",
+                          search_term=search_term, returned_count=len(dish_items), total_count=total_count)
         
-        if dishes and len(dishes) <= 3:
-            # Log the names of found dishes for debugging
-            dish_names = [dish.name for dish in dishes]
-            dish_logger.debug(f"Results: {', '.join(dish_names)}", "SEARCH")
+        if dish_items and len(dish_items) <= 3:
+            # Log the names and scores of found dishes for debugging
+            dish_names_scores = [(dish.name, score) for dish, score in scored_dishes[:3]]
+            dish_logger.debug(f"Top results: {dish_names_scores}", "SEARCH")
         
         return DishListResponse(
             dishes=dish_items,
-            total_count=total_count,
+            total_count=len(scored_dishes),  # Use actual filtered count
             page=page,
             page_size=page_size,
-            total_pages=total_pages
+            total_pages=math.ceil(len(scored_dishes) / page_size) if scored_dishes else 1
         )
 
     @staticmethod

@@ -673,7 +673,7 @@ If you found dishes for search, mention the variety and nutritional information 
     
     @classmethod
     async def _execute_dish_search(cls, search_term: str, db: Optional[AsyncSession]) -> Dict[str, Any]:
-        """Execute actual database search for dishes."""
+        """Execute actual database search for dishes using enhanced search logic."""
         if not db:
             return {
                 "success": False,
@@ -682,25 +682,20 @@ If you found dishes for search, mention the variety and nutritional information 
             }
         
         try:
-            from app.models.dish import Dish
-            from sqlalchemy import or_, func
+            from app.services.async_dish import AsyncDishService
             
-            # Search for dishes that match the search term
-            search_term_lower = search_term.lower()
+            # Use enhanced search from AsyncDishService
+            logger.info(f"🔍 [AGENT/DB] Using enhanced search for: '{search_term}'")
+            search_result = await AsyncDishService.search_dishes_by_name(
+                db=db,
+                search_term=search_term,
+                page=1,
+                page_size=10  # Limit to 10 results for agent responses
+            )
             
-            stmt = select(Dish).where(
-                or_(
-                    func.lower(Dish.name).contains(search_term_lower),
-                    func.lower(Dish.description).contains(search_term_lower)
-                )
-            ).limit(10)  # Limit to 10 results
-            
-            result = await db.execute(stmt)
-            dishes = result.scalars().all()
-            
-            # Convert dishes to dictionary format
+            # Convert dishes to dictionary format for JSON serialization
             dish_list = []
-            for dish in dishes:
+            for dish in search_result.dishes:
                 dish_dict = {
                     "id": dish.id,
                     "name": dish.name,
@@ -710,22 +705,25 @@ If you found dishes for search, mention the variety and nutritional information 
                     "calories": int(float(dish.calories)) if dish.calories else 0,
                     "protein_g": float(dish.protein_g) if dish.protein_g else 0,
                     "carbs_g": float(dish.carbs_g) if dish.carbs_g else 0,
-                    "fat_g": float(dish.fat_g) if dish.fat_g else 0,
-                    "servings": dish.servings
+                    "fats_g": float(dish.fats_g) if dish.fats_g else 0,
+                    "servings": dish.servings,
+                    "prep_time_minutes": dish.prep_time_minutes,
+                    "cook_time_minutes": dish.cook_time_minutes
                 }
                 dish_list.append(dish_dict)
             
-            logger.info(f"🗃️ [AGENT/DB] Found {len(dish_list)} dishes for '{search_term}'")
+            logger.info(f"✅ [AGENT/DB] Enhanced search found {len(dish_list)} dishes for '{search_term}' (total available: {search_result.total_count})")
             
             return {
                 "success": True,
                 "dishes": dish_list,
-                "total_found": len(dish_list),
-                "search_term": search_term
+                "total_found": search_result.total_count,
+                "search_term": search_term,
+                "returned_count": len(dish_list)
             }
             
         except Exception as e:
-            logger.error(f"❌ [AGENT/DB] Database search failed: {e}")
+            logger.error(f"❌ [AGENT/DB] Enhanced database search failed: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -734,30 +732,39 @@ If you found dishes for search, mention the variety and nutritional information 
     
     @classmethod
     async def _create_intake_widget(cls, search_term: str, user_message: str, db: Optional[AsyncSession]) -> Optional[Dict[str, Any]]:
-        """Create a dish selection widget for intake logging."""
+        """Create a dish selection widget for intake logging using enhanced search."""
         if not db:
             return None
             
         try:
             from app.models.dish import Dish
             from app.schemas.chat import DishSelectionWidget, DishCard, WidgetType, WidgetStatus
-            from sqlalchemy import or_, func
+            from app.services.async_dish import AsyncDishService
             
-            # Search for dishes that match the search term
-            search_term_lower = search_term.lower()
+            # Use enhanced search from AsyncDishService for better results
+            logger.info(f"🔍 [AGENT/WIDGET] Using enhanced search for intake widget: '{search_term}'")
+            search_result = await AsyncDishService.search_dishes_by_name(
+                db=db,
+                search_term=search_term,
+                page=1,
+                page_size=5  # Limit to 5 results for the widget
+            )
             
-            stmt = select(Dish).where(
-                or_(
-                    func.lower(Dish.name).contains(search_term_lower),
-                    func.lower(Dish.description).contains(search_term_lower)
-                )
-            ).limit(5)  # Limit to 5 results for the widget
-            
-            result = await db.execute(stmt)
-            dishes = result.scalars().all()
+            # Get the actual dish objects from the search results
+            dishes = []
+            if search_result.dishes:
+                # Convert DishListItem back to Dish objects for widget creation
+                from sqlalchemy import select
+                dish_ids = [dish.id for dish in search_result.dishes]
+                stmt = select(Dish).where(Dish.id.in_(dish_ids))
+                result = await db.execute(stmt)
+                dishes_dict = {dish.id: dish for dish in result.scalars().all()}
+                
+                # Maintain the search result order
+                dishes = [dishes_dict[dish.id] for dish in search_result.dishes if dish.id in dishes_dict]
             
             if not dishes:
-                logger.warning(f"🚫 [AGENT/WIDGET] No dishes found for '{search_term}'")
+                logger.warning(f"🚫 [AGENT/WIDGET] No dishes found for '{search_term}' using enhanced search")
                 return None
             
             # Extract portion from user message
@@ -783,14 +790,14 @@ If you found dishes for search, mention the variety and nutritional information 
                 created_at=datetime.utcnow().isoformat()
             )
             
-            logger.info(f"🎯 [AGENT/WIDGET] Created widget with {len(dish_cards)} dishes for '{search_term}' (widget_id: {widget_id})")
+            logger.info(f"✅ [AGENT/WIDGET] Enhanced search created widget with {len(dish_cards)} dishes for '{search_term}' (widget_id: {widget_id}, total_found: {search_result.total_count})")
             
             return {
                 "widgets": [widget.dict()]
             }
             
         except Exception as e:
-            logger.error(f"❌ [AGENT/WIDGET] Error creating intake widget: {e}")
+            logger.error(f"❌ [AGENT/WIDGET] Error creating intake widget with enhanced search: {e}")
             return None
 
     @classmethod
